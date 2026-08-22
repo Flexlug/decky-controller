@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Decky CLI / loader artifacts
+cli/
+decky_plugin.py
+/.yalc
+yalc.lock
+
+# Logs / temp
+*.log
+*.swp
+tmp/
+
+# Editors / OS
+.idea/
+*.iml
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
