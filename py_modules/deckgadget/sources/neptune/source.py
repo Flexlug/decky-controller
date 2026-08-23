@@ -100,8 +100,8 @@ class NeptuneUsbSource:
         if usb_device is not None:
             try:
                 usb_device.release_interface(self.interface)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.warning("releasing interface %d failed: %s", self.interface, exc)
             usb_device.close()
         # all capture interfaces, not only the ones we detached: a crashed run may have left others unbound
         try:
@@ -130,7 +130,8 @@ class NeptuneUsbSource:
                 return self.usb_device.control_in(USB_REQTYPE_GET_CLASS_INTERFACE, HID_REQ_GET_REPORT,
                                                   FEATURE_WVALUE, self.interface, HID_FEATURE_REPORT_BYTES,
                                                   timeout_ms)
-            except OSError:
+            except OSError as exc:
+                log.debug("feature read-back failed: %s", exc)
                 return None
 
     def disable_lizard_mode(self) -> None:
@@ -153,7 +154,8 @@ class NeptuneUsbSource:
                 self.heartbeat_errors += 1
                 if self.heartbeat_errors <= 3 or self.heartbeat_errors % 30 == 0:
                     log.warning("heartbeat failed (%d): %s", self.heartbeat_errors, exc)
-            except NeptuneError:
+            except NeptuneError as exc:
+                log.debug("heartbeat stops: %s", exc)
                 break
 
     def rumble(self, left: int, right: int) -> None:

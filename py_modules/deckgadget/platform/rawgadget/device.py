@@ -13,6 +13,7 @@ import struct
 from typing import List, Optional, Tuple
 
 from ...util.ioctl import ioctl
+from ...util.log import get_logger
 from .ioctls import (
     SZ_EP_DESC, SZ_EP_INFO, SZ_EP_IO, SZ_EPS_INFO, SZ_EVENT, SZ_INIT, UDC_NAME_LENGTH_MAX,
     USB_RAW_IOCTL_CONFIGURE, USB_RAW_IOCTL_EP0_READ, USB_RAW_IOCTL_EP0_STALL, USB_RAW_IOCTL_EP0_WRITE,
@@ -20,6 +21,8 @@ from .ioctls import (
     USB_RAW_IOCTL_EPS_INFO, USB_RAW_IOCTL_EVENT_FETCH, USB_RAW_IOCTL_INIT, USB_RAW_IOCTL_RUN,
     USB_RAW_IOCTL_VBUS_DRAW,
 )
+
+log = get_logger("raw_gadget")
 
 DEFAULT_DEVICE = "/dev/raw-gadget"
 
@@ -35,8 +38,8 @@ class RawGadgetDevice:
         if fd >= 0:
             try:
                 os.close(fd)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("closing %s: %s", self.path, exc)
 
     def init(self, driver: str, device: str, speed: int) -> None:
         arg = ctypes.create_string_buffer(

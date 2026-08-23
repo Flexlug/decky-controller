@@ -47,6 +47,7 @@ class Backlight:
         try:
             return int(text) if text else None
         except ValueError:
+            log.warning("ignoring corrupt backlight state file %s: %r", self.state_file, text)
             return None
 
     def _safe_value(self, saved: Optional[int]) -> int:
@@ -92,8 +93,8 @@ class Backlight:
             self._saved = None
             try:
                 os.unlink(self.state_file)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("cannot remove %s: %s", self.state_file, exc)
         log.info("backlight restored to %d", value)
         return value
 

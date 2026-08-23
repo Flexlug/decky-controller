@@ -40,7 +40,8 @@ def find_touchscreen(sysfs: str = "/sys", dev: str = "/dev",
     try:
         with open("/proc/bus/input/devices", "r", encoding="utf-8", errors="replace") as f:
             blocks = f.read().split("\n\n")
-    except OSError:
+    except OSError as exc:
+        log.debug("cannot read /proc/bus/input/devices: %s", exc)
         return None
     for block in blocks:
         if name_substr.lower() not in block.lower():
@@ -96,8 +97,8 @@ class TouchWatcher:
         if self._fd >= 0:
             try:
                 os.close(self._fd)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("closing touch fd: %s", exc)
             self._fd = -1
 
     def _run(self) -> None:
@@ -105,7 +106,9 @@ class TouchWatcher:
         while not self._stop.is_set():
             try:
                 readable, _, _ = select.select([fd], [], [], 0.25)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                if not self._stop.is_set():
+                    log.warning("touchscreen %s unreadable, touch-to-wake stops: %s", self.event_path, exc)
                 break
             if not readable:
                 continue

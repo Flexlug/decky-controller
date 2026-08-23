@@ -142,6 +142,7 @@ def cmd_recover(args: argparse.Namespace) -> int:
     try:
         report = guard.recover()
     except Exception as exc:  # noqa: BLE001 - recover must never fail loudly
+        log.error("recover crashed: %s", exc, exc_info=True)
         report = {"ok": False, "errors": [str(exc)]}
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     return 0

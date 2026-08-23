@@ -103,7 +103,8 @@ def find_gamescope_socket(run_user_base: str = RUN_USER_BASE, prefer_uid: int = 
     else:
         try:
             entries = os.listdir(run_user_base)
-        except OSError:
+        except OSError as exc:
+            log.debug("cannot list %s: %s", run_user_base, exc)
             return None
         uid_entries = [entry for entry in entries if entry.isdigit()]
         uid_entries.sort(key=lambda entry: (0 if int(entry) == prefer_uid else 1, int(entry)))
@@ -111,7 +112,8 @@ def find_gamescope_socket(run_user_base: str = RUN_USER_BASE, prefer_uid: int = 
     for directory in dirs:
         try:
             names = [name for name in os.listdir(directory) if name.startswith(GAMESCOPE_SOCKET_PREFIX)]
-        except OSError:
+        except OSError as exc:
+            log.debug("cannot list %s: %s", directory, exc)
             continue
         for name in sorted(names, key=_display_number):
             if _is_socket(os.path.join(directory, name)):

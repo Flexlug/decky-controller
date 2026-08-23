@@ -5,6 +5,7 @@ import os
 from typing import List, Optional
 
 from deckhw.neptune import CAPTURE_INTERFACES, USBHID_DRIVER, NeptuneDevice
+from deckhw.sysfs import Sysfs
 
 from ..util.fs import write_text
 from ..util.log import get_logger
@@ -20,11 +21,7 @@ class UsbhidBinder:
         self.driver_dir = os.path.join(sysfs, "bus", "usb", "drivers", USBHID_DRIVER)
 
     def bound_driver(self, interface_name: str) -> Optional[str]:
-        path = os.path.join(self.sysfs, "bus", "usb", "devices", interface_name, "driver")
-        try:
-            return os.path.basename(os.readlink(path))
-        except OSError:
-            return None
+        return Sysfs(self.sysfs).link_name("bus", "usb", "devices", interface_name, "driver")
 
     def unbind(self, interface_name: str) -> bool:
         """Detach ``interface_name`` from usbhid. Returns True if a write happened."""

@@ -28,7 +28,8 @@ def _rmdir_quiet(path: str) -> bool:
     try:
         os.rmdir(path)
         return True
-    except OSError:
+    except OSError as exc:
+        log.debug("rmdir %s: %s", path, exc)
         return False
 
 
@@ -36,7 +37,8 @@ def _unlink_quiet(path: str) -> bool:
     try:
         os.unlink(path)
         return True
-    except OSError:
+    except OSError as exc:
+        log.debug("unlink %s: %s", path, exc)
         return False
 
 
@@ -45,7 +47,8 @@ def list_gadgets(configfs: str = CONFIGFS, prefix: str = GADGET_PREFIX) -> List[
     base = os.path.join(configfs, "usb_gadget")
     try:
         return sorted(os.path.join(base, name) for name in os.listdir(base) if name.startswith(prefix))
-    except OSError:
+    except OSError as exc:
+        log.debug("no configfs gadgets at %s: %s", base, exc)
         return []
 
 
@@ -76,6 +79,8 @@ def remove_configfs_gadget(gadget_dir: str) -> Report:
         write_text(udc_file, "\n")
         report["unbound"] = True
     except OSError as exc:
+        if exc.errno != errno.ENODEV:
+            log.warning("cannot unbind gadget %s from its UDC: %s", gadget_dir, exc)
         report["unbound"] = False if exc.errno == errno.ENODEV else f"error: {exc}"
     # configfs only lets the tree go in this order: function symlinks, configs, functions, strings, gadget.
     for config_dir in sorted(glob.glob(os.path.join(gadget_dir, "configs", "*"))):

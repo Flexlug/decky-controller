@@ -118,8 +118,8 @@ class UsbHidTransport:
         if fd >= 0:
             try:
                 os.close(fd)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("closing hidg node: %s", exc)
         if os.path.isdir(self.gadget_dir):
             guard.remove_configfs_gadget(self.gadget_dir)
             log.info("f_hid gadget removed (sent=%d dropped=%d)", self._metrics.sent, self._slot.dropped)
@@ -170,7 +170,8 @@ class UsbHidTransport:
                 with open(dev_attr, "r", encoding="utf-8") as f:
                     major, minor = (int(part) for part in f.read().strip().split(":"))
                 wanted_rdev = os.makedev(major, minor)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                log.debug("no usable %s yet (%s) — will take the first hidg node", dev_attr, exc)
                 wanted_rdev = None
             try:
                 for entry in sorted(os.listdir(self.dev)):
@@ -179,8 +180,8 @@ class UsbHidTransport:
                     path = os.path.join(self.dev, entry)
                     if wanted_rdev is None or os.stat(path).st_rdev == wanted_rdev:
                         return path
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("scanning %s for hidg nodes: %s", self.dev, exc)
             time.sleep(0.05)
         raise TransportError("no /dev/hidg* node appeared after binding the gadget")
 
@@ -199,7 +200,9 @@ class UsbHidTransport:
             except BlockingIOError:
                 try:
                     select.select([], [fd], [], 0.25)
-                except (OSError, ValueError):
+                except (OSError, ValueError) as exc:
+                    if not self._stop.is_set():
+                        log.warning("hidg node gone while writing: %s", exc)
                     break
             except OSError as exc:
                 if exc.errno == errno.ESHUTDOWN:
@@ -220,7 +223,9 @@ class UsbHidTransport:
         while not self._stop.is_set():
             try:
                 readable, _, _ = select.select([fd], [], [], 0.25)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                if not self._stop.is_set():
+                    log.warning("hidg node gone while reading: %s", exc)
                 break
             if not readable:
                 continue

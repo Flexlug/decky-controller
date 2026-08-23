@@ -62,8 +62,8 @@ class JsonEventSink:
             try:
                 self._stream.write(line + "\n")
                 self._stream.flush()
-            except (OSError, ValueError):
-                pass  # stdout closed: the supervisor is gone, keep running the teardown path
+            except (OSError, ValueError) as exc:
+                logging.getLogger(LOGGER_NAME).debug("event sink closed (supervisor gone?): %s", exc)
 
     def state(self, state: str, detail: str = "") -> None:
         self.emit("state", state=state, detail=detail)

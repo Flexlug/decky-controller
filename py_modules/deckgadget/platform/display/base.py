@@ -4,6 +4,10 @@ from __future__ import annotations
 import os
 from typing import Dict, Optional
 
+from ...util.log import get_logger
+
+log = get_logger("display")
+
 STATE_DIRS = ("/run/deckgadget", "/tmp/deckgadget")
 STATE_FILE_NAME = "brightness"
 
@@ -18,8 +22,8 @@ def default_state_file(run_dir: Optional[str] = None) -> str:
             os.makedirs(directory, exist_ok=True)
             if os.access(directory, os.W_OK):
                 return os.path.join(directory, STATE_FILE_NAME)
-        except OSError:
-            continue
+        except OSError as exc:
+            log.debug("state dir %s not usable: %s", directory, exc)
     return os.path.join("/tmp", "deckgadget-" + STATE_FILE_NAME)
 
 

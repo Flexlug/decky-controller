@@ -106,7 +106,8 @@ class DaemonSupervisor:
         try:
             with open(self.paths.pidfile, encoding="utf-8") as pidfile:
                 text = pidfile.read().strip()
-        except OSError:
+        except OSError as exc:
+            log.debug("no pidfile to check (%s)", exc)
             return
         try:
             pid = int(text)
@@ -122,6 +123,7 @@ class DaemonSupervisor:
             try:
                 os.kill(pid, signal_number)
             except ProcessLookupError:
+                log.debug("stale daemon pid %d already gone", pid)
                 break
             deadline = time.monotonic() + grace
             while time.monotonic() < deadline and is_deckgadget_pid(pid):

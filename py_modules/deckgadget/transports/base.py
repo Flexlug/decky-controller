@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, runtime_checkable
 
 from ..profiles.base import Feedback, Profile
+from ..util.log import get_logger
+
+log = get_logger("transport")
 
 #: signal used to interrupt blocking ioctls in worker threads (raw-gadget has no timeouts)
 CANCEL_SIGNAL = signal.SIGUSR1
@@ -88,8 +91,8 @@ def interrupt_thread(thread: Optional[threading.Thread]) -> None:
         return
     try:
         signal.pthread_kill(thread.ident, CANCEL_SIGNAL)
-    except (ProcessLookupError, ValueError, OSError):
-        pass
+    except (ProcessLookupError, ValueError, OSError) as exc:
+        log.debug("cannot interrupt thread %s: %s", thread.name, exc)
 
 
 def join_with_interrupts(threads, timeout: float, interval: float = 0.05) -> bool:
