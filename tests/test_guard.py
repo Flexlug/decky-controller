@@ -248,6 +248,21 @@ class RecoverTest(unittest.TestCase):
         self.assertEqual(rep["backlight"]["restored"], 127)
         self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "127")
 
+    def test_gadget_that_cannot_be_removed_is_an_error(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        gadget = self.fs.add_gadget("deckctl_hid")
+        locked = os.path.join(gadget, "functions", "hid.usb0", "locked")
+        write(os.path.join(locked, "keep"), "x")
+        os.chmod(locked, 0o555)                     # its file cannot be unlinked → the tree survives
+        try:
+            rep = self.recover()
+        finally:
+            os.chmod(locked, 0o755)
+        self.assertFalse(rep["ok"], rep)
+        self.assertFalse(rep["gadgets"][0]["removed"])
+        self.assertTrue(any("still present" in e for e in rep["errors"]), rep["errors"])
+
     def test_remove_gadget_missing(self):
         rep = guard.remove_configfs_gadget(os.path.join(self.fs.configfs, "usb_gadget", "nope"))
         self.assertFalse(rep["existed"])

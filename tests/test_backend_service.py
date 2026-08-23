@@ -40,6 +40,12 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
     def events(self, name):
         return [payload for event, payload in self.emitted if event == name]
 
+    def exited_run(self, exit_code, pid=4242, stop_requested=False):
+        run = DaemonRun(process=types.SimpleNamespace(pid=pid, returncode=exit_code), args=[], started_at=0.0,
+                        exit_code=exit_code, stop_requested=stop_requested)
+        self.service.supervisor.run = run
+        return run
+
     def fake_process(self, pid=4242, returncode=None):
         self.service.supervisor.run = DaemonRun(process=types.SimpleNamespace(pid=pid, returncode=returncode),
                                                 args=[], started_at=0.0)
@@ -133,13 +139,29 @@ class RecoverTest(ServiceTestCase):
         self.assertIn("reboot", toast["body"])
 
     async def test_unrequested_daemon_exit_recovers_and_toasts_on_failure(self):
-        await self.service._on_daemon_exit(1, requested=False)
+        await self.service._on_daemon_exit(self.exited_run(1))
         self.assertEqual(self.cli.calls[0][0], "recover")
         self.assertEqual(self.events("toast")[0]["severity"], "error")
         self.assertEqual(self.events("status")[-1]["session_state"], "IDLE")
         self.cli.calls.clear()
-        await self.service._on_daemon_exit(0, requested=True)
+        await self.service._on_daemon_exit(self.exited_run(0, stop_requested=True))
         self.assertEqual(self.cli.calls, [])   # stop() owns that rollback
+
+    async def test_late_exit_handler_leaves_a_newer_session_alone(self):
+        old_run = self.exited_run(1, pid=1)
+        self.fake_process(pid=2)                       # a newer session is already running
+        self.service.session.begin("xbox360", "raw")
+        await self.service._on_daemon_event({"ev": "state", "state": "ACTIVE"})
+        await self.service._on_daemon_exit(old_run)
+        self.assertNotIn("recover", [call[0] for call in self.cli.calls])   # nothing rolled back under the new session
+        self.assertEqual(self.service.session.state, "ACTIVE")
+        self.assertEqual(self.service.session.active_profile, "xbox360")
+
+    async def test_exit_handled_once_even_if_delivered_twice(self):
+        run = self.exited_run(1)
+        await self.service._on_daemon_exit(run)
+        await self.service._on_daemon_exit(run)
+        self.assertEqual([call[0] for call in self.cli.calls if call[0] == "recover"], ["recover"])
 
 
 class StartTest(ServiceTestCase):
@@ -151,6 +173,31 @@ class StartTest(ServiceTestCase):
     async def test_missing_py_modules_dir_is_reported(self):
         with self.assertRaises(FileNotFoundError):
             await self.service.start(None)
+
+    async def test_start_after_an_unhandled_crash_recovers_before_spawning(self):
+        os.makedirs(self.service.paths.py_modules_dir)
+        crashed = self.exited_run(1)
+        order = []
+
+        async def fake_spawn(args):
+            order.append("spawn")
+            self.fake_process(pid=9)
+            self.service.supervisor.run.first_event.set()
+
+        original_run = self.service.cli.run
+
+        async def recording_run(subcommand, *args, timeout):
+            order.append(subcommand)
+            return await original_run(subcommand, *args, timeout=timeout)
+
+        with mock.patch.object(self.service.supervisor, "spawn", fake_spawn), \
+             mock.patch.object(self.service.cli, "run", recording_run):
+            await self.service.start(None)
+        self.assertEqual(order[:2], ["recover", "spawn"])
+        self.assertTrue(crashed.exit_handled)
+        self.cli.calls.clear()
+        await self.service._on_daemon_exit(crashed)       # the late handler must now be a no-op
+        self.assertNotIn("recover", [call[0] for call in self.cli.calls])
 
     async def test_start_spawns_with_settings_and_reports_the_running_session(self):
         os.makedirs(self.service.paths.py_modules_dir)

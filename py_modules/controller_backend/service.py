@@ -14,7 +14,7 @@ from typing import Awaitable, Callable, Optional
 from controller_backend.daemon.commands import CliRunner, normalize_cli_status, run_recover, run_status
 from controller_backend.daemon.events import JsonDict
 from controller_backend.daemon.launcher import DaemonPaths, run_args
-from controller_backend.daemon.supervisor import DaemonSupervisor
+from controller_backend.daemon.supervisor import DaemonRun, DaemonSupervisor
 from controller_backend.diagnostics import build_diagnostics
 from controller_backend.session import SessionView, Toast
 from controller_backend.settings import PROFILES, SettingsStore, resolve_transport
@@ -102,6 +102,10 @@ class Service:
                 raise FileNotFoundError(f"daemon package directory missing: {self.paths.py_modules_dir}")
             for directory in (self.runtime_dir, self.log_dir):
                 os.makedirs(directory, exist_ok=True)
+            previous = self.supervisor.run
+            if previous is not None and not previous.stop_requested and not previous.exit_handled:
+                previous.exit_handled = True   # died unexpectedly and its exit handler has not run yet
+                await self._recover(f"before-start after daemon-exit rc={previous.exit_code}")
             self.session.begin(profile, resolve_transport(profile, str(settings["transport"])))
             await self.supervisor.spawn(run_args(settings, profile, self.paths.log_path))
         # Outside the lock (a fast-failing daemon needs it for its rollback): wait briefly for the first event
@@ -161,16 +165,19 @@ class Service:
         if outcome.emit_status:
             await self.emit_status()
 
-    async def _on_daemon_exit(self, exit_code: int, requested: bool) -> None:
-        if requested:
+    async def _on_daemon_exit(self, run: DaemonRun) -> None:
+        if run.stop_requested:
             return   # stop() owns the rollback and the status refresh
-        self.session.reset()
-        if exit_code != 0:
-            body = self.session.last_error or f"daemon exited with code {exit_code} — see the Decky log"
-            await self._toast(Toast("Controller mode failed", body, "error"))
         async with self.operation_lock:
-            if not self.supervisor.alive():   # a newer session may already be running — never roll that one back
-                await self._recover(f"daemon-exit rc={exit_code}")
+            if run.exit_handled or self.supervisor.run is not run:
+                self.log.info("daemon pid %s: exit already handled or a newer session is running", run.process.pid)
+                return
+            run.exit_handled = True
+            self.session.reset()
+            if run.exit_code != 0:
+                body = self.session.last_error or f"daemon exited with code {run.exit_code} — see the Decky log"
+                await self._toast(Toast("Controller mode failed", body, "error"))
+            await self._recover(f"daemon-exit rc={run.exit_code}")
         await self.emit_status(force=True)
 
     async def _recover(self, reason: str) -> bool:

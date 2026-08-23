@@ -106,9 +106,13 @@ def _remove_gadgets(configfs: str, prefix: str, report: Report) -> None:
     """Step 1: every configfs gadget of ours. raw-gadget needs nothing here: it dies with the daemon's fd."""
     for gadget_dir in list_gadgets(configfs, prefix):
         try:
-            report["gadgets"].append(remove_configfs_gadget(gadget_dir))  # type: ignore[union-attr]
+            gadget_report = remove_configfs_gadget(gadget_dir)
         except Exception as exc:  # noqa: BLE001
             report["errors"].append(f"gadget {gadget_dir}: {exc}")  # type: ignore[union-attr]
+            continue
+        report["gadgets"].append(gadget_report)  # type: ignore[union-attr]
+        if not gadget_report["removed"]:
+            report["errors"].append(f"gadget {gadget_dir}: still present (unbound={gadget_report.get('unbound')})")  # type: ignore[union-attr]
 
 
 def _rebind_neptune(sysfs: str, dev: str, report: Report) -> None:

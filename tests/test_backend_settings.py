@@ -106,6 +106,17 @@ class SettingsStoreTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.path + ".tmp"))
         self.assertEqual(S.SettingsStore(self.path).load()["profile"], "hid_gamepad")
 
+    def test_hand_edit_is_picked_up_and_survives_the_next_update(self):
+        self.store.update({"profile": "hid_gamepad"})
+        edited = json.loads(read(self.path))
+        edited["kill_hold_ms"] = 3000
+        write(self.path, json.dumps(edited))
+        os.utime(self.path, ns=(0, os.stat(self.path).st_mtime_ns + 1_000_000))   # a later mtime, even on coarse clocks
+        self.assertEqual(self.store.load()["kill_hold_ms"], 3000)
+        merged, _ = self.store.update({"kill_combo": "L5+R5"})
+        self.assertEqual((merged["kill_hold_ms"], merged["kill_combo"], merged["profile"]), (3000, "L5+R5", "hid_gamepad"))
+        self.assertEqual(json.loads(read(self.path))["kill_hold_ms"], 3000)
+
     def test_update_persists_and_reports_warnings(self):
         merged, warnings = self.store.update({"kill_combo": "L5+R5", "profile": "nope"})
         self.assertEqual(merged["kill_combo"], "L5+R5")

@@ -24,7 +24,7 @@ DRAIN_TIMEOUT_S = 2.0
 OUTPUT_RING_SIZE = 200
 
 EventCallback = Callable[[JsonDict], Awaitable[None]]
-ExitCallback = Callable[[int, bool], Awaitable[None]]
+ExitCallback = Callable[["DaemonRun"], Awaitable[None]]
 
 
 @dataclass
@@ -35,6 +35,7 @@ class DaemonRun:
     started_at: float
     exit_code: Optional[int] = None
     stop_requested: bool = False
+    exit_handled: bool = False   # set by whoever rolled this run back (exit handler or a later start)
     first_event: asyncio.Event = field(default_factory=asyncio.Event)   # first stdout event, or exit
     output: collections.deque[str] = field(default_factory=lambda: collections.deque(maxlen=OUTPUT_RING_SIZE))
     task: Optional[asyncio.Task[None]] = None
@@ -46,7 +47,7 @@ class DaemonRun:
 
 class DaemonSupervisor:
     """Owns at most one ``deckgadget run`` process. ``on_event`` gets every JSON event from stdout;
-    ``on_exit(exit_code, stop_requested)`` runs once the process is gone and its output is drained."""
+    ``on_exit(run)`` runs once the process is gone and its output is drained."""
 
     def __init__(self, paths: DaemonPaths, on_event: EventCallback, on_exit: ExitCallback) -> None:
         self.paths = paths
@@ -158,12 +159,13 @@ class DaemonSupervisor:
         except Exception:
             log.exception("daemon output pump failed")
         run.exit_code = await run.process.wait()
-        self._remove_pidfile()
+        if self.run is run:   # a newer run may already own the pidfile
+            self._remove_pidfile()
         log.info("daemon pid %s exited with code %s (%s)", run.process.pid, run.exit_code,
                  "requested" if run.stop_requested else "unexpected")
         run.first_event.set()
         try:
-            await self.on_exit(run.exit_code, run.stop_requested)
+            await self.on_exit(run)
         except Exception:
             log.exception("daemon exit handler failed")
 

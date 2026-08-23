@@ -88,14 +88,18 @@ def resolve_transport(profile: str, transport: str) -> str:
 
 
 class SettingsStore:
-    """``settings.json``, sanitized on load, written atomically; a corrupt file yields the defaults."""
+    """``settings.json``, sanitized on load, written atomically; a corrupt file yields the defaults. The file
+    is re-read whenever its mtime changes, so a hand edit of the file is picked up and never
+    overwritten by the next UI change."""
 
     def __init__(self, path: str) -> None:
         self.path = path
         self._cached: Optional[JsonDict] = None
+        self._cached_mtime: Optional[int] = None
 
     def load(self) -> JsonDict:
-        if self._cached is None:
+        mtime = self._mtime()
+        if self._cached is None or mtime != self._cached_mtime:
             data: Any = None
             try:
                 with open(self.path, encoding="utf-8") as settings_file:
@@ -108,7 +112,7 @@ class SettingsStore:
                                                    copy.deepcopy(DEFAULT_SETTINGS))
             for warning in warnings:
                 log.warning("%s: %s (ignored)", self.path, warning)
-            self._cached = settings
+            self._cached, self._cached_mtime = settings, mtime
         return copy.deepcopy(self._cached)
 
     def save(self, settings: JsonDict) -> None:
@@ -118,7 +122,13 @@ class SettingsStore:
             json.dump(settings, settings_file, indent=2, sort_keys=True)
             settings_file.write("\n")
         os.replace(temp_path, self.path)
-        self._cached = copy.deepcopy(settings)
+        self._cached, self._cached_mtime = copy.deepcopy(settings), self._mtime()
+
+    def _mtime(self) -> Optional[int]:
+        try:
+            return os.stat(self.path).st_mtime_ns
+        except OSError:
+            return None
 
     def update(self, partial: Any) -> tuple[JsonDict, list[str]]:
         merged, warnings = sanitize_settings(partial, self.load())
