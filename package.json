@@ -1,6 +1,6 @@
 {
   "name": "decky-controller",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Use your Steam Deck as a wired Xbox 360 (XInput) or generic USB gamepad for another PC.",
   "type": "module",
   "packageManager": "pnpm@9.15.9",

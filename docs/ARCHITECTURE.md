@@ -108,7 +108,7 @@ while the daemon lives) and `toast` (`{"title", "body", "severity": "info|warn|e
 ### Status
 
 ```json
-{"ok": true, "plugin_version": "0.1.0", "kernel": "6.16…", "model": "Galileo",
+{"ok": true, "plugin_version": "0.2.0", "kernel": "6.16…", "model": "Galileo",
  "drd_enabled": true, "udc_name": "dwc3.1.auto", "udc_state": "configured|not attached|…|null", "udc_speed": "…|null",
  "extcon": {"USB": 0, "USB-HOST": 0}, "host_connected": true,
  "cable_power": true, "pd_contract_mv": 5000, "pd_contract_ma": 1500, "cable_kind": "pc",
