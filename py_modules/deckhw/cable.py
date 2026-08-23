@@ -59,7 +59,8 @@ def _labelled_channel(sysfs: Sysfs, hwmon: str, prefix: str, label: str, default
 
 def classify_cable(extcon: Dict[str, int], power: Optional[bool], pd_contract_mv: Optional[int]) -> str:
     """One of ``CABLE_KINDS``: a host-side device (dock) wins, then "no power", then the PD contract
-    (≤ 5.5 V = PC/hub port, above = charger); ``unknown`` when power is unreadable or the contract reads 0."""
+    (≤ 5.5 V = PC/hub port, above = charger); ``unknown`` when there is no usable contract (missing or 0) and
+    power is not known to be off."""
     if extcon.get("USB-HOST") == 1:
         return "host_device"
     if power is False:

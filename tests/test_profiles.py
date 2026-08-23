@@ -138,7 +138,7 @@ class HidGamepadTest(unittest.TestCase):
     def test_buttons_and_paddles(self):
         rep = self.p.pack(ControllerState(buttons=S.BTN_B | S.BTN_R1 | S.BTN_MENU | S.BTN_L4 | S.BTN_STEAM))
         btn = struct.unpack_from("<H", rep, 7)[0]
-        self.assertEqual(btn, (1 << 1) | (1 << 5) | (1 << 9) | (1 << 12))   # B, R1, MENU, L4 (own button 13), no STEAM
+        self.assertEqual(btn, (1 << 1) | (1 << 5) | (1 << 9))   # B, R1, MENU; unassigned L4 and STEAM send nothing
         p = H.HidGamepadProfile(paddles={"L4": "A", "R4": "DPAD_DOWN"})
         rep = p.pack(ControllerState(buttons=S.BTN_L4 | S.BTN_R4))
         btn = struct.unpack_from("<H", rep, 7)[0]

@@ -55,7 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## SDL — Simple DirectMedia Layer (zlib) — protocol reference only
 
 The layout of the Steam Deck built-in controller's HID input report and the feature-report commands used
-to take over / release it (`py_modules/deckgadget/sources/neptune_usb.py` — constants marked `# SDL:`)
+to take over / release it (`py_modules/deckgadget/sources/neptune/protocol.py` and `commands.py` — constants marked `# SDL:`)
 were worked out with SDL's Steam Deck HIDAPI driver as a reference for the wire protocol.
 **No SDL source code is copied into this project**; only the publicly observable protocol (report IDs,
 byte offsets, message/command numbers) was used, and the Python implementation is original.

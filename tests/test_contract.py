@@ -172,6 +172,21 @@ class AllowedValuesTest(unittest.TestCase):
         self.assertTrue(backend_settings.DEFAULT_SETTINGS["screen_off"])
 
 
+class TransportResolutionTest(unittest.TestCase):
+    def test_backend_and_daemon_resolve_transport_identically(self):
+        for profile in config.PROFILES:
+            for transport in config.TRANSPORTS:
+                try:
+                    expected = config.resolve_transport(profile, transport)
+                except config.ConfigError:
+                    expected = ValueError
+                if expected is ValueError:
+                    with self.assertRaises(ValueError, msg=f"{profile}/{transport}"):
+                        backend_settings.resolve_transport(profile, transport)
+                else:
+                    self.assertEqual(backend_settings.resolve_transport(profile, transport), expected, f"{profile}/{transport}")
+
+
 class SessionStateTest(BackendHarness):
     def test_session_states_agree(self):
         self.assertEqual(list(events.SESSION_STATES), ts_union("SessionState"))

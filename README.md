@@ -65,7 +65,7 @@ real device), so it is not submitted there. The store's other technical requirem
    the PC detects a new controller within a few seconds. `joy.cpl` (Windows) or any game can be used to
    check it.
 4. To exit: hold the exit combination for 1.5 s (L4+R4 by default); or touch the screen (it turns on for a
-   few seconds) and press **Stop (full reset)**; or unplug the cable. The screen turns on and the controller
+   few seconds) and press **Stop controller mode** in the overlay; or unplug the cable. The screen turns on and the controller
    returns to Steam.
 
 In the active mode the Deck does not react to its own buttons, Steam and QAM included: all input goes to the
@@ -108,8 +108,8 @@ forwarded to the PC.
 
 ## Troubleshooting
 
-* **DRD: not detected / "DRD not enabled"** — follow "Enabling DRD in the BIOS". After enabling, the state is
-  shown as soon as SteamOS has booted.
+* **DRD: Disabled** — follow "Enabling DRD in the BIOS". After enabling, the row shows **Enabled** as soon as
+  SteamOS has booted.
 * **Cable: Not connected** with a cable attached — the port sees no power: the cable or the port is faulty,
   or the PC's port is asleep. Try another cable with data lines or another port; some PCs need a second after
   plugging in. **Charger** — a charger is connected, not a PC. **Dock** — a dock or a peripheral is

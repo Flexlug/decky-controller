@@ -191,7 +191,8 @@ IDLE -> CAPTURING  screen off (gamescope sleep / kscreen DPMS / backlight); unbi
      -> STOPPING -> STOPPED   rollback in reverse order, then exit
 ```
 
-* The kill combo (held for `kill_hold_ms`) is armed from CAPTURING on and is never forwarded to the PC.
+* The kill combo (held for `kill_hold_ms`) is armed once the read loop runs (from WAITING_HOST on) and is never
+  forwarded to the PC.
   Steam/QAM are not forwarded unless `--forward-steam` / `--forward-qam` (not exposed in the UI).
 * Cable unplug in ACTIVE (UDC state leaves `configured` for longer than a short grace period) → `kill unplug`.
 * Touching the touchscreen while the screen is off wakes it for `touch_wake_seconds`, then it sleeps again.

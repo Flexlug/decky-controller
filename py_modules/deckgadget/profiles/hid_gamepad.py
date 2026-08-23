@@ -3,8 +3,8 @@
 Report descriptor (verified on a Linux host): Game Pad with X, Y, Z, Rz, Rx, Ry (6 x int8), hat switch
 (4 bits + 4 bits padding) and 16 buttons -> 9-byte input report ``X Y Z Rz Rx Ry | hat | buttons u16 LE``.
 X/Y = left stick, Z/Rz = right stick, Rx/Ry = triggers (0..127), hat = D-pad, buttons 1..16 =
-A B X Y L1 R1 L3 R3 VIEW MENU STEAM QAM L4 L5 R4 R5 (Steam/QAM only when forwarded; paddles default to
-their own buttons 13..16 unless remapped).
+A B X Y L1 R1 L3 R3 VIEW MENU STEAM QAM (Steam/QAM only when forwarded); buttons 13..16 are reserved. The
+back paddles send nothing unless assigned in the settings, the same as on the XInput profile.
 """
 from __future__ import annotations
 
@@ -89,7 +89,6 @@ DEFAULT_BUTTON_MAP = (
     (S.BTN_L1, _hid_button_bit(HB_L1)), (S.BTN_R1, _hid_button_bit(HB_R1)), (S.BTN_L3, _hid_button_bit(HB_L3)), (S.BTN_R3, _hid_button_bit(HB_R3)),
     (S.BTN_VIEW, _hid_button_bit(HB_VIEW)), (S.BTN_MENU, _hid_button_bit(HB_MENU)),
 )
-PADDLE_DEFAULT = {"L4": _hid_button_bit(HB_L4), "L5": _hid_button_bit(HB_L5), "R4": _hid_button_bit(HB_R4), "R5": _hid_button_bit(HB_R5)}
 PADDLE_BITS = {"L4": S.BTN_L4, "L5": S.BTN_L5, "R4": S.BTN_R4, "R5": S.BTN_R5}
 DPAD_TARGETS = {"DPAD_UP": S.BTN_DPAD_UP, "DPAD_DOWN": S.BTN_DPAD_DOWN,
                 "DPAD_LEFT": S.BTN_DPAD_LEFT, "DPAD_RIGHT": S.BTN_DPAD_RIGHT}
@@ -147,14 +146,14 @@ class HidGamepadProfile:
         if forward_qam:
             table.append((S.BTN_QAM, _hid_button_bit(HB_QAM)))
         dpad_extra = []  # paddles mapped to D-pad directions go through the hat
-        for paddle, default_bit in PADDLE_DEFAULT.items():
-            target = str((paddles or {}).get(paddle, "none")).upper()
+        for paddle, target in (paddles or {}).items():
+            target = str(target).upper()
             if target == "NONE":
-                table.append((PADDLE_BITS[paddle], default_bit))
+                continue
             elif target in HB_BY_TARGET:
-                table.append((PADDLE_BITS[paddle], HB_BY_TARGET[target]))
+                table.append((PADDLE_BITS[paddle.upper()], HB_BY_TARGET[target]))
             elif target in DPAD_TARGETS:
-                dpad_extra.append((PADDLE_BITS[paddle], DPAD_TARGETS[target]))
+                dpad_extra.append((PADDLE_BITS[paddle.upper()], DPAD_TARGETS[target]))
             else:
                 raise ValueError(f"unknown paddle target {target!r}")
         self._table = tuple(table)

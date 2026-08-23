@@ -81,10 +81,13 @@ def sanitize_settings(partial: Any, base: JsonDict) -> tuple[JsonDict, list[str]
 
 
 def resolve_transport(profile: str, transport: str) -> str:
-    """``auto`` → raw for xbox360 (vendor descriptors need raw-gadget), hid for hid_gamepad (configfs f_hid)."""
-    if transport != "auto":
-        return transport
-    return "raw" if profile == "xbox360" else "hid"
+    """``auto`` → raw for xbox360 (vendor descriptors need raw-gadget), hid for hid_gamepad (configfs f_hid);
+    xbox360 over hid is rejected, as the daemon's config.resolve_transport does."""
+    if transport == "auto":
+        return "raw" if profile == "xbox360" else "hid"
+    if profile == "xbox360" and transport == "hid":
+        raise ValueError("profile xbox360 requires transport raw (configfs f_hid cannot emulate XInput)")
+    return transport
 
 
 class SettingsStore:

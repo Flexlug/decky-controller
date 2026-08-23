@@ -74,6 +74,8 @@ class SanitizeSettingsTest(unittest.TestCase):
         self.assertEqual(S.resolve_transport("xbox360", "auto"), "raw")
         self.assertEqual(S.resolve_transport("hid_gamepad", "auto"), "hid")
         self.assertEqual(S.resolve_transport("hid_gamepad", "raw"), "raw")
+        with self.assertRaises(ValueError):
+            S.resolve_transport("xbox360", "hid")
 
 
 class SettingsStoreTest(unittest.TestCase):
