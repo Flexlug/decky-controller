@@ -1,0 +1,38 @@
+# Dependencies (pnpm is the package manager: pnpm-lock.yaml IS tracked)
+node_modules/
+.pnpm-store/
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Decky CLI / loader artifacts
+cli/
+decky_plugin.py
+/.yalc
+yalc.lock
+
+# Local working notes / drafts (not part of the release)
+notes/
+
+# Logs / temp
+*.log
+*.swp
+tmp/
+
+# Editors / OS
+.idea/
+*.iml
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env

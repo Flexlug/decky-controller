@@ -1,0 +1,59 @@
+{
+  "name": "decky-controller",
+  "version": "0.1.0",
+  "description": "Use your Steam Deck as a wired Xbox 360 (XInput) or generic USB gamepad for another PC.",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "typecheck": "tsc --noEmit",
+    "zip": "bash scripts/build-zip.sh",
+    "test": "python3 -m compileall -q py_modules main.py && python3 -m unittest discover -s tests -v"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/flexlug/decky-controller.git"
+  },
+  "keywords": [
+    "decky",
+    "plugin",
+    "steam-deck",
+    "controller",
+    "usb",
+    "gamepad",
+    "xinput",
+    "usb-gadget"
+  ],
+  "author": "flexlug",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/flexlug/decky-controller/issues"
+  },
+  "homepage": "https://github.com/flexlug/decky-controller#readme",
+  "devDependencies": {
+    "@decky/rollup": "^1.0.2",
+    "@decky/ui": "^4.11.0",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "@types/webpack": "^5.28.5",
+    "rollup": "^4.53.3",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "@decky/api": "^1.1.3",
+    "react-icons": "^5.3.0",
+    "tslib": "^2.7.0"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": [
+        "react",
+        "react-dom"
+      ]
+    }
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-musl": "^4.53.3"
+  }
+}
