@@ -20,7 +20,7 @@ Quick Access Menu (src/*)  --callables/events-->  main.py + py_modules/controlle
   through usbfs, packs reports into the selected profile and pushes them to the PC through a USB gadget.
 
 Requirements (minimums): any Steam Deck; SteamOS 3.6+ (Valve kernel with EC‑extcon USB role switching and the
-`raw_gadget` / `f_hid` modules — verified on SteamOS 3.8.16 / OLED; LCD testing planned); Decky Loader;
+`raw_gadget` / `f_hid` modules — verified on SteamOS 3.8.16 on both the OLED and the LCD model); Decky Loader;
 Python 3.11+.
 
 ## Module map

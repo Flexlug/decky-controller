@@ -2,7 +2,8 @@
 
 What was checked on a real Steam Deck while designing the plugin, and what the code relies on. Reference
 device: Steam Deck OLED 1 TB ("Galileo"), BIOS F7G0114, SteamOS 3.8.16, kernel 6.16.12‑valve24.5, Python 3.13.
-The facts below are expected to hold for any Deck on SteamOS 3.6+ with Valve's kernel (LCD testing planned).
+Also verified end to end (controller mode on a PC, exit by combo, rollback) on a Steam Deck LCD 256 GB ("Jupiter")
+with the same SteamOS release; the facts below hold on both models unless a line says otherwise.
 
 ## USB‑C port: DRD and role switching
 
@@ -74,7 +75,7 @@ plugin's `run` captured the controller and a game on the PC was played from the 
   compositor — not used. `bl_power` exists but is not honoured for the OLED.
 * Touch wake: the touchscreen (`FTS3528:00 2808:1015` on the OLED, evdev) keeps working while the controller is
   captured. The daemon finds it by capabilities (`INPUT_PROP_DIRECT` + `ABS_MT_POSITION_X`, the udev
-  `ID_INPUT_TOUCHSCREEN` test), so a different panel controller on the LCD model is picked up the same way.
+  `ID_INPUT_TOUCHSCREEN` test), so the LCD model's panel controller is picked up the same way (confirmed).
 
 ## Sources
 
