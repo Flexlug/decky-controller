@@ -32,21 +32,17 @@ Deck в исходное состояние.
 
 Те же шаги показывает кнопка **How to enable DRD** в плагине.
 
-Ограничение: при включённом DRD Windows, установленная на самом Deck, не видит порт USB (у Windows нет
-драйвера для dual‑role‑контроллера). Если нужен USB в Windows на Deck, верните значение XHCI. На SteamOS
-режим не влияет.
-
 ## Установка
 
-1. Скачайте `decky-controller.zip`:
-   <https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip>
-2. На Deck включите **Decky → Settings → Developer mode**.
-3. **Decky → Developer → Install Plugin from URL** — вставьте ссылку выше; либо **Install Plugin from ZIP**,
-   если файл уже скопирован на Deck.
-4. Плагин появится в меню быстрого доступа на вкладке Decky.
-
 Плагин распространяется только через GitHub Releases; в официальном магазине Decky и сторонних магазинах
-его нет.
+его нет. Сначала на Deck включите **Decky → Settings → Developer mode**, затем одним из двух способов:
+
+* **По ссылке** — **Decky → Developer → Install Plugin from URL**, вставьте
+  `https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip`.
+* **Из файла** — скачайте `decky-controller.zip` по той же ссылке, скопируйте на Deck (SD‑карта, флешка,
+  `scp`) и выберите **Decky → Developer → Install Plugin from ZIP**.
+
+Плагин появится в меню быстрого доступа на вкладке Decky.
 
 ### Почему плагина нет в магазине Decky
 
@@ -102,7 +98,9 @@ Menu → Start, D‑pad → D‑pad. Кнопки Steam и QAM не переда
   от USB‑порта ПК в пределах его возможностей.
 * Интерфейс Deck в активном режиме недоступен, включая кнопку Steam.
 * Гироскоп, трекпады, вибрация и Bluetooth в текущей версии не поддерживаются.
-* Windows на самом Deck не видит USB при включённом DRD (см. выше).
+* Если на Deck вторым разделом установлена Windows: при включённом DRD она не видит порт USB (у Windows нет
+  драйвера для dual‑role‑контроллера); для USB под Windows верните в BIOS значение XHCI. SteamOS работает в
+  обоих режимах.
 
 ## Устранение неполадок
 

@@ -33,21 +33,18 @@ chosen automatically from what is plugged in.
 
 The **How to enable DRD** button in the plugin shows the same steps.
 
-Limitation: with DRD enabled, a Windows installation on the Deck itself does not see the USB port (Windows
-has no driver for the dual‑role controller). If you need USB under Windows on the Deck, set the value back
-to XHCI. SteamOS is unaffected either way.
-
 ## Installation
 
-1. Download `decky-controller.zip`:
-   <https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip>
-2. On the Deck enable **Decky → Settings → Developer mode**.
-3. **Decky → Developer → Install Plugin from URL** — paste the link above; or **Install Plugin from ZIP**
-   if the file is already on the Deck.
-4. The plugin appears in the Quick Access Menu on the Decky tab.
-
 The plugin is distributed through GitHub Releases only; it is not in the official Decky store or in any
-third‑party store.
+third‑party store. First enable **Decky → Settings → Developer mode** on the Deck, then use one of the two
+ways:
+
+* **By URL** — **Decky → Developer → Install Plugin from URL**, paste
+  `https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip`.
+* **From a file** — download `decky-controller.zip` from the same link, copy it to the Deck (SD card, USB
+  stick, `scp`) and choose **Decky → Developer → Install Plugin from ZIP**.
+
+The plugin appears in the Quick Access Menu on the Decky tab.
 
 ### Why the plugin is not in the Decky store
 
@@ -105,7 +102,9 @@ forwarded to the PC.
   PC's USB port within that port's limits.
 * The Deck's UI is unavailable in the active mode, the Steam button included.
 * Gyro, trackpads, rumble and Bluetooth are not supported in the current version.
-* Windows on the Deck itself does not see USB while DRD is enabled (see above).
+* If Windows is installed on a second partition of the Deck: with DRD enabled it does not see the USB port
+  (Windows has no driver for the dual‑role controller); for USB under Windows set the BIOS value back to
+  XHCI. SteamOS works in both modes.
 
 ## Troubleshooting
 
