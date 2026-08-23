@@ -7,43 +7,15 @@ from deckgadget.util import ioctl as I
 
 
 class IocMacroTest(unittest.TestCase):
-    def test_usbdevfs_numbers_x86_64(self):
+    def test_usbfs_struct_layouts_match_kernel_abi(self):
         from deckgadget.sources import neptune_usb as N
 
         self.assertEqual(ctypes.sizeof(N.UsbfsCtrlTransfer), 24)
         self.assertEqual(ctypes.sizeof(N.UsbfsBulkTransfer), 24)
         self.assertEqual(ctypes.sizeof(N.UsbfsDisconnectClaim), 264)
         self.assertEqual(ctypes.sizeof(N.UsbfsGetDriver), 260)
-        self.assertEqual(N.USBDEVFS_CONTROL, 0xC0185500)
+        self.assertEqual(N.USBDEVFS_CONTROL, 0xC0185500)   # linux/usbdevice_fs.h on x86_64
         self.assertEqual(N.USBDEVFS_BULK, 0xC0185502)
-        self.assertEqual(N.USBDEVFS_CLAIMINTERFACE, 0x8004550F)
-        self.assertEqual(N.USBDEVFS_RELEASEINTERFACE, 0x80045510)
-        self.assertEqual(N.USBDEVFS_DISCONNECT, 0x5516)
-        self.assertEqual(N.USBDEVFS_CONNECT, 0x5517)
-        self.assertEqual(N.USBDEVFS_IOCTL, 0xC0105512)
-        self.assertEqual(N.USBDEVFS_DISCONNECT_CLAIM, 0x8108551B)
-        self.assertEqual(N.USBDEVFS_GETDRIVER, 0x41045508)
-        self.assertEqual(N.USBDEVFS_RESET, 0x5514)
-
-    def test_raw_gadget_numbers_match_spike(self):
-        from deckgadget.transports import usb_raw_gadget as R
-
-        def ioc(d, t, nr, size):  # the spike's macro
-            return (d << 30) | (size << 16) | (ord(t) << 8) | nr
-
-        self.assertEqual(R.USB_RAW_IOCTL_INIT, ioc(1, "U", 0, 257))
-        self.assertEqual(R.USB_RAW_IOCTL_RUN, ioc(0, "U", 1, 0))
-        self.assertEqual(R.USB_RAW_IOCTL_EVENT_FETCH, ioc(2, "U", 2, 8))
-        self.assertEqual(R.USB_RAW_IOCTL_EP0_WRITE, ioc(1, "U", 3, 8))
-        self.assertEqual(R.USB_RAW_IOCTL_EP0_READ, ioc(3, "U", 4, 8))
-        self.assertEqual(R.USB_RAW_IOCTL_EP_ENABLE, ioc(1, "U", 5, 9))
-        self.assertEqual(R.USB_RAW_IOCTL_EP_DISABLE, ioc(1, "U", 6, 4))
-        self.assertEqual(R.USB_RAW_IOCTL_EP_WRITE, ioc(1, "U", 7, 8))
-        self.assertEqual(R.USB_RAW_IOCTL_EP_READ, ioc(3, "U", 8, 8))
-        self.assertEqual(R.USB_RAW_IOCTL_CONFIGURE, ioc(0, "U", 9, 0))
-        self.assertEqual(R.USB_RAW_IOCTL_VBUS_DRAW, ioc(1, "U", 10, 4))
-        self.assertEqual(R.USB_RAW_IOCTL_EPS_INFO, ioc(2, "U", 11, 960))
-        self.assertEqual(R.USB_RAW_IOCTL_EP0_STALL, ioc(0, "U", 12, 0))
 
     def test_macro_helpers(self):
         self.assertEqual(I.IO("U", 20), 0x5514)

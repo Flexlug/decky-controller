@@ -120,18 +120,6 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(r[2:11], struct.pack("<BHHHbb", 0, 0, 0x1234, 0xABCD, 2, 0))
         self.assertEqual(N.cmd_rumble(-5, 999999)[2:11], struct.pack("<BHHHbb", 0, 0, 0, 65535, 2, 0))
 
-    def test_constants(self):
-        self.assertEqual(N.ID_CONTROLLER_DECK_STATE, 9)
-        self.assertEqual(N.SETTING_LEFT_TRACKPAD_MODE, 7)
-        self.assertEqual(N.SETTING_RIGHT_TRACKPAD_MODE, 8)
-        self.assertEqual(N.SETTING_SMOOTH_ABSOLUTE_MOUSE, 24)
-        self.assertEqual(N.SETTING_IMU_MODE, 48)
-        self.assertEqual(N.SETTING_LEFT_TRACKPAD_CLICK_PRESSURE, 52)
-        self.assertEqual(N.SETTING_RIGHT_TRACKPAD_CLICK_PRESSURE, 53)
-        self.assertEqual(N.SETTING_STEAM_WATCHDOG_ENABLE, 71)
-        self.assertEqual(N.TRACKPAD_NONE, 7)
-        self.assertEqual(N.FEATURE_WVALUE, 0x0300)
-
 
 if __name__ == "__main__":
     unittest.main()

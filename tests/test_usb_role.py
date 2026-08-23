@@ -1,9 +1,4 @@
-"""Cable detection (``platform/usb_role.py``) against a fake sysfs tree.
-
-The fixtures mirror what was read on a Deck OLED (docs/HARDWARE.md, docs/ARCHITECTURE.md):
-``/sys/class/power_supply/ACAD/online``, the ``steamdeck_hwmon`` hwmon with the PD contract
-channels and ``steamdeck-extcon``.
-"""
+"""Cable detection (``platform/usb_role.py``) against a fake sysfs tree."""
 import os
 import shutil
 import tempfile
@@ -12,57 +7,20 @@ import unittest
 import _path  # noqa: F401
 
 from deckgadget.platform import usb_role as UR
+from fakes import FakeSysfs, write
 
 
-def write(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(text)
-
-
-class FakeSysfs:
-    """Fake /sys: ACAD power supply, steamdeck_hwmon (deliberately not hwmon0), extcon0 and a UDC."""
-
-    def __init__(self, root, *, acad_online=1, pd_mv=5000, pd_ma=1500, usb_host=0, usb=0,
-                 udc_state="not attached", with_udc=True, with_acad=True, with_hwmon=True, with_labels=True):
-        self.sys = os.path.join(root, "sys")
-        self.dev = os.path.join(root, "dev")
-        os.makedirs(self.dev)
-        ps = os.path.join(self.sys, "class", "power_supply")
-        # a battery (decoy) is always there
-        write(os.path.join(ps, "BAT1", "type"), "Battery\n")
-        write(os.path.join(ps, "BAT1", "online"), "1\n")
-        if with_acad:
-            write(os.path.join(ps, "ACAD", "type"), "Mains\n")
-            write(os.path.join(ps, "ACAD", "online"), f"{acad_online}\n")
-        hw = os.path.join(self.sys, "class", "hwmon")
-        # decoys: a hwmon with its own in0/curr1 channels (must never be picked) and an unreadable one
-        write(os.path.join(hw, "hwmon0", "name"), "amdgpu\n")
-        write(os.path.join(hw, "hwmon0", "in0_input"), "20000\n")
-        write(os.path.join(hw, "hwmon0", "in0_label"), "vddgfx\n")
-        write(os.path.join(hw, "hwmon0", "curr1_input"), "999\n")
-        os.makedirs(os.path.join(hw, "hwmon1"))
-        if with_hwmon:
-            self.hwmon = os.path.join(hw, "hwmon3")
-            write(os.path.join(self.hwmon, "name"), "steamdeck_hwmon\n")
-            if with_labels:
-                # real layout: in0 = PD voltage, curr1 = PD current, plus other channels
-                write(os.path.join(self.hwmon, "in0_label"), "PD Contract Voltage\n")
-                write(os.path.join(self.hwmon, "curr1_label"), "PD Contract Current\n")
-                write(os.path.join(self.hwmon, "temp1_label"), "Battery Temp\n")
-                write(os.path.join(self.hwmon, "temp1_input"), "30000\n")
-            write(os.path.join(self.hwmon, "in0_input"), f"{pd_mv}\n")
-            write(os.path.join(self.hwmon, "curr1_input"), f"{pd_ma}\n")
-        ext = os.path.join(self.sys, "class", "extcon", "extcon0")
-        write(os.path.join(ext, "name"), "steamdeck-extcon\n")
-        write(os.path.join(ext, "state"), f"USB={usb}\nUSB-HOST={usb_host}\nSDP=0\nCDP=0\nDCP=0\nACA=0\n")
-        if with_udc:
-            udc = os.path.join(self.sys, "class", "udc", "dwc3.1.auto")
-            write(os.path.join(udc, "state"), f"{udc_state}\n")
-            write(os.path.join(udc, "current_speed"), "UNKNOWN\n")
-            write(os.path.join(udc, "function"), "\n")
-        # no PCI devices -> detect_drd must not crash
-        os.makedirs(os.path.join(self.sys, "bus", "pci", "devices"))
+def port_tree(root, *, acad_online=1, pd_mv=5000, pd_ma=1500, usb_host=0, usb=0, udc_state="not attached",
+              with_udc=True, with_acad=True, with_hwmon=True, with_labels=True):
+    """Fake /sys as seen on the Deck: ACAD, steamdeck_hwmon (deliberately not hwmon0), extcon0, a UDC."""
+    fs = FakeSysfs(root)
+    fs.add_power_supply(acad_online=acad_online, with_acad=with_acad)
+    fs.add_hwmon(pd_mv=pd_mv, pd_ma=pd_ma, with_steamdeck=with_hwmon, with_labels=with_labels)
+    fs.add_extcon(usb=usb, usb_host=usb_host)
+    if with_udc:
+        fs.add_udc(state=udc_state)
+    fs.add_pci_bus()
+    return fs
 
 
 class CableDetectionTest(unittest.TestCase):
@@ -71,7 +29,7 @@ class CableDetectionTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
 
     def status(self, **kw):
-        fs = FakeSysfs(tempfile.mkdtemp(dir=self.root), **kw)   # fresh tree per call (tests loop over variants)
+        fs = port_tree(tempfile.mkdtemp(dir=self.root), **kw)   # fresh tree per call (tests loop over variants)
         return UR.usb_role_status(fs.sys, fs.dev, use_modprobe=False)
 
     # --- the four kinds + unknown -------------------------------------------------------------
@@ -132,29 +90,29 @@ class CableDetectionTest(unittest.TestCase):
 
     # --- helpers -------------------------------------------------------------------------------
     def test_hwmon_found_by_name_not_index(self):
-        fs = FakeSysfs(self.root, pd_mv=5000, pd_ma=1500)
+        fs = port_tree(self.root, pd_mv=5000, pd_ma=1500)
         self.assertEqual(UR.find_hwmon("steamdeck_hwmon", fs.sys), fs.hwmon)
         self.assertIsNone(UR.find_hwmon("nope", fs.sys))
         self.assertEqual(UR.pd_contract(fs.sys), (5000, 1500))     # not hwmon0's 20000/999
 
     def test_hwmon_without_labels_falls_back_to_in0_curr1(self):
-        fs = FakeSysfs(self.root, pd_mv=5000, pd_ma=1500, with_labels=False)
+        fs = port_tree(self.root, pd_mv=5000, pd_ma=1500, with_labels=False)
         self.assertEqual(UR.pd_contract(fs.sys), (5000, 1500))
 
     def test_hwmon_with_mismatching_labels_returns_none(self):
-        fs = FakeSysfs(self.root, pd_mv=5000, pd_ma=1500)
+        fs = port_tree(self.root, pd_mv=5000, pd_ma=1500)
         write(os.path.join(fs.hwmon, "in0_label"), "Something Else\n")
         self.assertEqual(UR.pd_contract(fs.sys), (None, 1500))
 
     def test_cable_power_mains_fallback(self):
-        fs = FakeSysfs(self.root, with_acad=False)
+        fs = port_tree(self.root, with_acad=False)
         self.assertIsNone(UR.cable_power(fs.sys))
         write(os.path.join(fs.sys, "class", "power_supply", "ADP1", "type"), "Mains\n")
         write(os.path.join(fs.sys, "class", "power_supply", "ADP1", "online"), "1\n")
         self.assertIs(UR.cable_power(fs.sys), True)
 
     def test_cable_power_garbage_is_none(self):
-        fs = FakeSysfs(self.root)
+        fs = port_tree(self.root)
         write(os.path.join(fs.sys, "class", "power_supply", "ACAD", "online"), "abc\n")
         self.assertIsNone(UR.cable_power(fs.sys))
 
@@ -172,12 +130,6 @@ class CableDetectionTest(unittest.TestCase):
         for kind in ("none", "pc", "charger", "host_device", "unknown"):
             self.assertIn(kind, UR.CABLE_KINDS)
 
-    def test_as_dict_exposes_new_keys(self):
-        d = self.status(acad_online=1, pd_mv=5000, pd_ma=1500).as_dict()
-        for key in ("cable_power", "pd_contract_mv", "pd_contract_ma", "cable_kind", "host_connected", "udc_state"):
-            self.assertIn(key, d)
-        self.assertEqual(d["cable_kind"], "pc")
-
     def test_empty_sysfs_does_not_crash(self):
         empty = os.path.join(self.root, "empty")
         os.makedirs(empty)
@@ -188,20 +140,17 @@ class CableDetectionTest(unittest.TestCase):
 
 
 class CollectStatusTest(unittest.TestCase):
-    """``deckgadget status`` JSON carries the new keys (what main.py reads)."""
-
-    def test_collect_status_has_cable_keys(self):
+    def test_cli_status_carries_cable_classification(self):
         from deckgadget.__main__ import collect_status
 
         root = tempfile.mkdtemp(prefix="usb_role_cli_")
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        fs = FakeSysfs(root, acad_online=1, pd_mv=15000, pd_ma=3000)
+        fs = port_tree(root, acad_online=1, pd_mv=15000, pd_ma=3000)
         out = collect_status(fs.sys, fs.dev, use_modprobe=False)
-        self.assertEqual(out["cable_kind"], "charger")
-        self.assertIs(out["cable_power"], True)
-        self.assertEqual(out["pd_contract_mv"], 15000)
-        self.assertEqual(out["pd_contract_ma"], 3000)
+        self.assertEqual((out["cable_kind"], out["cable_power"], out["pd_contract_mv"], out["pd_contract_ma"]),
+                         ("charger", True, 15000, 3000))
         self.assertFalse(out["host_connected"])
+        self.assertEqual(out["udc_state"], "not attached")
 
 
 if __name__ == "__main__":

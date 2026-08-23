@@ -52,6 +52,7 @@ export interface Status {
   drd_enabled: boolean;
   udc_name: string | null;
   udc_state: string | null;
+  udc_speed: string | null;
   extcon: Record<string, number>;
   /** udc_state === "configured" — only meaningful once a session is up. */
   host_connected: boolean;
@@ -63,12 +64,16 @@ export interface Status {
   neptune_present: boolean;
   neptune_captured: boolean;
   daemon_running: boolean;
+  daemon_pid: number | null;
   session_state: SessionState;
+  session_detail: string;
   active_profile: Profile | null;
   transport: ActiveTransport | null;
   screen_off: boolean;
   last_error: string | null;
-  metrics: { hz: number; reports: number };
+  metrics: { hz: number; reports: number; dropped: number };
+  /** Set when the hardware fields came from the backend's sysfs fallback instead of `deckgadget status`. */
+  status_error: string | null;
 }
 
 export interface Settings {

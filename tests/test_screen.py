@@ -1,6 +1,5 @@
 import os
 import shutil
-import socket
 import struct
 import tempfile
 import threading
@@ -11,25 +10,7 @@ import _path  # noqa: F401
 
 from deckgadget.platform import screen as SC
 from deckgadget.util.log import NullEventSink
-
-
-def write(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(text)
-
-
-def read(path):
-    with open(path) as f:
-        return f.read()
-
-
-def make_socket(path):
-    """Create a real unix socket at ``path`` (returned object must stay alive)."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.bind(path)
-    return s
+from fakes import make_socket, read, write
 
 
 class FakeRunner:
@@ -81,9 +62,6 @@ class FakeMethod(SC.ScreenMethod):
         return self.wake_ok
 
 
-# ------------------------------------------------------------------------------------------
-# Backlight (unchanged semantics)
-# ------------------------------------------------------------------------------------------
 
 class BacklightTest(unittest.TestCase):
     def setUp(self):
@@ -148,9 +126,6 @@ class BacklightTest(unittest.TestCase):
         self.assertFalse(missing.sleep())
 
 
-# ------------------------------------------------------------------------------------------
-# gamescope display sleep
-# ------------------------------------------------------------------------------------------
 
 class GamescopeSleepTest(unittest.TestCase):
     def setUp(self):
@@ -296,9 +271,6 @@ class RunCommandTest(unittest.TestCase):
         self.assertIn("timeout", slow.error)
 
 
-# ------------------------------------------------------------------------------------------
-# Touchscreen
-# ------------------------------------------------------------------------------------------
 
 class TouchscreenTest(unittest.TestCase):
     def setUp(self):
@@ -349,9 +321,6 @@ class TouchscreenTest(unittest.TestCase):
         self.assertEqual(hits, [1])
 
 
-# ------------------------------------------------------------------------------------------
-# ScreenController: method choice, touch wake / re-sleep, deactivate
-# ------------------------------------------------------------------------------------------
 
 def wait_until(pred, timeout=2.0):
     deadline = time.monotonic() + timeout

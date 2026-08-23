@@ -160,12 +160,12 @@ def _is_deckgadget_pid(pid: int) -> bool:
         return False
 
 
-def _sysfs_snapshot() -> JsonDict:
+def _sysfs_snapshot(sysfs: str = "/sys") -> JsonDict:
     """Read-only USB-role / controller view straight from sysfs: cheap connectivity polling between
     ``deckgadget status`` calls, and the fallback when that CLI is unavailable (the CLI wins otherwise)."""
     snapshot: JsonDict = {
         "kernel": os.uname().release,
-        "model": _read_text("/sys/class/dmi/id/product_name"),
+        "model": _read_text(f"{sysfs}/class/dmi/id/product_name"),
         "drd_enabled": False,
         "udc_name": None,
         "udc_state": None,
@@ -182,26 +182,26 @@ def _sysfs_snapshot() -> JsonDict:
     # DRD on in BIOS ⇒ PCI 04:00.3 is re-classed by the kernel and claimed by dwc3-pci; off ⇒ xhci_hcd owns it
     # and the dwc3_pci module is not even loaded, so the driver directory does not exist.
     try:
-        snapshot["drd_enabled"] = any(":" in entry for entry in os.listdir("/sys/bus/pci/drivers/dwc3-pci"))
+        snapshot["drd_enabled"] = any(":" in entry for entry in os.listdir(f"{sysfs}/bus/pci/drivers/dwc3-pci"))
     except OSError:
         snapshot["drd_enabled"] = False
     # A UDC exists only while dwc3 is in device role (Deck plugged into a host, nothing in host role).
     try:
-        udcs = sorted(os.listdir("/sys/class/udc"))
+        udcs = sorted(os.listdir(f"{sysfs}/class/udc"))
     except OSError:
         udcs = []
     if udcs:
         snapshot["udc_name"] = udcs[0]
-        snapshot["udc_state"] = _read_text(f"/sys/class/udc/{udcs[0]}/state")
-        snapshot["udc_speed"] = _read_text(f"/sys/class/udc/{udcs[0]}/current_speed")
+        snapshot["udc_state"] = _read_text(f"{sysfs}/class/udc/{udcs[0]}/state")
+        snapshot["udc_speed"] = _read_text(f"{sysfs}/class/udc/{udcs[0]}/current_speed")
         snapshot["host_connected"] = snapshot["udc_state"] == "configured"
     # steamdeck-extcon: "USB=0\nUSB-HOST=1\nSDP=0…" — USB=1 ⇒ we are a device, USB-HOST=1 ⇒ we are a host.
     try:
-        extcons = sorted(os.listdir("/sys/class/extcon"))
+        extcons = sorted(os.listdir(f"{sysfs}/class/extcon"))
     except OSError:
         extcons = []
     for name in extcons:
-        text = _read_text(f"/sys/class/extcon/{name}/state")
+        text = _read_text(f"{sysfs}/class/extcon/{name}/state")
         if not text:
             continue
         for line in text.splitlines():
@@ -214,15 +214,15 @@ def _sysfs_snapshot() -> JsonDict:
         break
     # Port power (EC "ACAD" supply) + negotiated USB-PD contract (steamdeck_hwmon, found by name: in0 = mV,
     # curr1 = mA). PC port = 5 V, PD charger = 15-20 V — same rule as usb_role.classify_cable.
-    online = _read_text("/sys/class/power_supply/ACAD/online")
+    online = _read_text(f"{sysfs}/class/power_supply/ACAD/online")
     if online in ("0", "1"):
         snapshot["cable_power"] = online == "1"
     try:
-        hwmons = sorted(os.listdir("/sys/class/hwmon"))
+        hwmons = sorted(os.listdir(f"{sysfs}/class/hwmon"))
     except OSError:
         hwmons = []
     for name in hwmons:
-        base = f"/sys/class/hwmon/{name}"
+        base = f"{sysfs}/class/hwmon/{name}"
         if _read_text(f"{base}/name") != "steamdeck_hwmon":
             continue
         for key, file_name in (("pd_contract_mv", "in0_input"), ("pd_contract_ma", "curr1_input")):
@@ -239,11 +239,11 @@ def _sysfs_snapshot() -> JsonDict:
         snapshot["cable_kind"] = "pc" if snapshot["pd_contract_mv"] <= 5500 else "charger"
     # Built-in controller present on the USB bus (it lives on a different xHCI than the USB-C port).
     try:
-        for device_name in os.listdir("/sys/bus/usb/devices"):
+        for device_name in os.listdir(f"{sysfs}/bus/usb/devices"):
             # skip interfaces ("1-3:1.0") and root hubs ("usb1")
             if ":" in device_name or not device_name[:1].isdigit():
                 continue
-            base = f"/sys/bus/usb/devices/{device_name}"
+            base = f"{sysfs}/bus/usb/devices/{device_name}"
             if _read_text(f"{base}/idVendor") == NEPTUNE_VID and _read_text(f"{base}/idProduct") == NEPTUNE_PID:
                 snapshot["neptune_present"] = True
                 break

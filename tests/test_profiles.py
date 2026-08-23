@@ -33,8 +33,7 @@ class Xbox360PackTest(unittest.TestCase):
         self.assertEqual((lx, ly, rx, ry), (1000, -2000, 32767, -32768))   # +Y = up, no inversion
         self.assertEqual(rep[14:], b"\x00" * 6)
 
-    def test_spike_vector(self):
-        # values from the original raw-gadget spike demo: A pressed, lx=30000, ly=0 -> buttons 0x1000
+    def test_known_vector_a_and_left_stick(self):
         rep = self.p.pack(ControllerState(buttons=S.BTN_A, lx=30000))
         self.assertEqual(rep, struct.pack("<BBHBBhhhh6x", 0, 0x14, 0x1000, 0, 0, 30000, 0, 0, 0))
 
@@ -74,7 +73,7 @@ class Xbox360DescriptorTest(unittest.TestCase):
         cfg = d.config_descriptor()
         self.assertEqual(len(cfg), 0x99)
         self.assertEqual(cfg[:9], struct.pack("<BBHBBBBB", 9, 2, 0x99, 4, 1, 0, 0xA0, 0xFA))
-        # IF0 vendor descriptor as seen by the host in the spike
+        # interface 0 vendor descriptor exactly as a real wired Xbox 360 pad reports it
         self.assertIn(bytes.fromhex("1121000101258114000000001301080000"), cfg)
         other = d.config_descriptor(7)
         self.assertEqual(other[1], 7)
@@ -120,8 +119,7 @@ class HidGamepadTest(unittest.TestCase):
         self.assertEqual(len(rep), 9)
         self.assertEqual(rep, struct.pack("<bbbbbbBH", 0, 0, 0, 0, 0, 0, H.HAT_NULL, 0))
 
-    def test_spike_vector(self):
-        # values from the original configfs spike test: x=100, button 1 -> '<bbbbbbBH' 100,0,0,0,0,0,0x08,1
+    def test_known_vector_a_and_x_axis(self):
         rep = self.p.pack(ControllerState(buttons=S.BTN_A, lx=100 << 8))
         self.assertEqual(rep, struct.pack("<bbbbbbBH", 100, 0, 0, 0, 0, 0, 0x08, 1))
 

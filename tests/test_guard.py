@@ -7,91 +7,7 @@ from unittest import mock
 import _path  # noqa: F401
 
 from deckgadget.platform import guard, neptune, screen
-
-
-def write(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(text)
-
-
-class FakeSysfs:
-    """Builds a fake /sys with a Neptune device (bus 3 dev 3), usbhid driver dirs and a backlight."""
-
-    def __init__(self, root):
-        self.root = root
-        self.sys = os.path.join(root, "sys")
-        self.dev = os.path.join(root, "dev")
-        self.configfs = os.path.join(root, "configfs")
-        self.devices = os.path.join(self.sys, "bus", "usb", "devices")
-        self.usbhid = os.path.join(self.sys, "bus", "usb", "drivers", "usbhid")
-        os.makedirs(self.usbhid)
-        write(os.path.join(self.usbhid, "bind"), "")
-        write(os.path.join(self.usbhid, "unbind"), "")
-        write(os.path.join(self.sys, "bus", "usb", "drivers_probe"), "")
-        d = os.path.join(self.devices, "3-3")
-        write(os.path.join(d, "idVendor"), "28de\n")
-        write(os.path.join(d, "idProduct"), "1205\n")
-        write(os.path.join(d, "busnum"), "3\n")
-        write(os.path.join(d, "devnum"), "3\n")
-        write(os.path.join(d, "product"), "Steam Controller\n")
-        # a decoy device
-        write(os.path.join(self.devices, "1-1", "idVendor"), "05e3\n")
-        write(os.path.join(self.devices, "1-1", "idProduct"), "0610\n")
-        write(os.path.join(self.devices, "usb1", "idVendor"), "1d6b\n")
-        write(os.path.join(self.devices, "usb1", "idProduct"), "0002\n")
-        for n, (cls, sub, proto, eps) in {0: (3, 0, 2, [(0x81, 3, 64)]), 1: (3, 1, 1, [(0x82, 3, 64)]),
-                                          2: (3, 0, 0, [(0x83, 3, 64)]), 3: (2, 2, 1, [(0x84, 3, 16)]),
-                                          4: (10, 0, 0, [(0x85, 2, 64), (0x05, 2, 64)])}.items():
-            itf = os.path.join(d, f"3-3:1.{n}")
-            write(os.path.join(itf, "bInterfaceNumber"), f"{n:02x}\n")
-            write(os.path.join(itf, "bInterfaceClass"), f"{cls:02x}\n")
-            write(os.path.join(itf, "bInterfaceSubClass"), f"{sub:02x}\n")
-            write(os.path.join(itf, "bInterfaceProtocol"), f"{proto:02x}\n")
-            for addr, attr, mp in eps:
-                ep = os.path.join(itf, f"ep_{addr:02x}")
-                write(os.path.join(ep, "bEndpointAddress"), f"{addr:02x}\n")
-                write(os.path.join(ep, "bmAttributes"), f"{attr:02x}\n")
-                write(os.path.join(ep, "wMaxPacketSize"), f"{mp:04x}\n")
-                write(os.path.join(ep, "bInterval"), "04\n")
-                write(os.path.join(ep, "direction"), "in\n" if addr & 0x80 else "out\n")
-            # devices/<itf> symlink like real sysfs
-            os.symlink(itf, os.path.join(self.devices, f"3-3:1.{n}"))
-            self.bind(n, "usbhid" if n < 3 else "cdc_acm")
-        # backlight
-        self.bl = os.path.join(self.sys, "class", "backlight", "amdgpu_bl0")
-        write(os.path.join(self.bl, "brightness"), "120\n")
-        write(os.path.join(self.bl, "max_brightness"), "255\n")
-        self.state_file = os.path.join(root, "run", "brightness")
-
-    def itf(self, n):
-        return os.path.join(self.devices, "3-3", f"3-3:1.{n}")
-
-    def bind(self, n, driver):
-        link = os.path.join(self.itf(n), "driver")
-        if os.path.lexists(link):
-            os.unlink(link)
-        os.symlink(os.path.join(self.sys, "bus", "usb", "drivers", driver), link)
-
-    def unbind(self, n):
-        link = os.path.join(self.itf(n), "driver")
-        if os.path.lexists(link):
-            os.unlink(link)
-
-    def read(self, *parts):
-        with open(os.path.join(*parts)) as f:
-            return f.read()
-
-    def add_gadget(self, name):
-        g = os.path.join(self.configfs, "usb_gadget", name)
-        write(os.path.join(g, "UDC"), "dwc3.1.auto\n")
-        write(os.path.join(g, "idVendor"), "0x1d6b\n")
-        os.makedirs(os.path.join(g, "strings", "0x409"))
-        os.makedirs(os.path.join(g, "configs", "c.1", "strings", "0x409"))
-        write(os.path.join(g, "configs", "c.1", "MaxPower"), "250\n")
-        os.makedirs(os.path.join(g, "functions", "hid.usb0"))
-        os.symlink(os.path.join(g, "functions", "hid.usb0"), os.path.join(g, "configs", "c.1", "hid.usb0"))
-        return g
+from fakes import FakeSysfs, read, write
 
 
 class KernelBinder(neptune.UsbhidBinder):
@@ -112,7 +28,7 @@ class KernelBinder(neptune.UsbhidBinder):
 class NeptuneDiscoveryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        self.fs = FakeSysfs(self.tmp)
+        self.fs = FakeSysfs(self.tmp).add_neptune().add_backlight()
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -138,17 +54,17 @@ class NeptuneDiscoveryTest(unittest.TestCase):
         binder = neptune.UsbhidBinder(self.fs.sys)
         detached = neptune.capture_interfaces(dev, binder)
         self.assertEqual(detached, ["3-3:1.0", "3-3:1.1", "3-3:1.2"])
-        self.assertEqual(self.fs.read(self.fs.usbhid, "unbind"), "3-3:1.2")  # last write (fake file is overwritten)
+        self.assertEqual(read(os.path.join(self.fs.usbhid, "unbind")), "3-3:1.2")  # last write (fake file is overwritten)
         # simulate the kernel detaching the driver for all three
         for n in (0, 1, 2):
             self.fs.unbind(n)
         # second capture is a no-op
         write(os.path.join(self.fs.usbhid, "unbind"), "")
         self.assertEqual(neptune.capture_interfaces(neptune.find_neptune(self.fs.sys, self.fs.dev), binder), [])
-        self.assertEqual(self.fs.read(self.fs.usbhid, "unbind"), "")
+        self.assertEqual(read(os.path.join(self.fs.usbhid, "unbind")), "")
         rebound = neptune.release_interfaces(neptune.find_neptune(self.fs.sys, self.fs.dev), binder)
         self.assertEqual(rebound, ["3-3:1.0", "3-3:1.1", "3-3:1.2"])
-        self.assertEqual(self.fs.read(self.fs.usbhid, "bind"), "3-3:1.2")
+        self.assertEqual(read(os.path.join(self.fs.usbhid, "bind")), "3-3:1.2")
 
 
 class FakeDisplay(screen.ScreenMethod):
@@ -180,7 +96,7 @@ class FakeDisplay(screen.ScreenMethod):
 class RecoverTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        self.fs = FakeSysfs(self.tmp)
+        self.fs = FakeSysfs(self.tmp).add_neptune().add_backlight()
         self.gamescope = FakeDisplay("gamescope")
         self.kscreen = FakeDisplay("kscreen")
 
@@ -192,7 +108,7 @@ class RecoverTest(unittest.TestCase):
         binder = (lambda sysfs: KernelBinder(sysfs, self.fs)) if kernel else neptune.UsbhidBinder
         with mock.patch.object(neptune, "UsbhidBinder", binder):
             return guard.recover(sysfs=self.fs.sys, configfs=self.fs.configfs, dev=self.fs.dev,
-                                 backlight_dir=self.fs.bl, state_file=self.fs.state_file,
+                                 backlight_dir=self.fs.backlight, state_file=self.fs.state_file,
                                  gamescope=self.gamescope, kscreen=self.kscreen)
 
     def test_recover_nothing_to_do(self):
@@ -201,8 +117,8 @@ class RecoverTest(unittest.TestCase):
         self.assertEqual(rep["gadgets"], [])
         self.assertEqual(rep["neptune"], {"present": True, "name": "3-3", "rebound": [], "still_captured": []})
         self.assertIsNone(rep["backlight"]["restored"])
-        self.assertEqual(self.fs.read(self.fs.usbhid, "bind"), "")
-        self.assertEqual(self.fs.read(self.fs.bl, "brightness"), "120\n")
+        self.assertEqual(read(os.path.join(self.fs.usbhid, "bind")), "")
+        self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "120\n")
         # no compositor reachable: nothing woken, no warnings
         self.assertEqual(rep["display"], {"gamescope": {"available": False}, "kscreen": {"available": False}})
         self.assertEqual(rep["warnings"], [])
@@ -212,7 +128,7 @@ class RecoverTest(unittest.TestCase):
     def test_recover_wakes_gamescope_and_still_restores_backlight(self):
         """Crashed gamescope-sleep session: wake via gamescope AND restore a saved backlight value."""
         self.gamescope = FakeDisplay("gamescope", available=True)
-        write(os.path.join(self.fs.bl, "brightness"), "0\n")
+        write(os.path.join(self.fs.backlight, "brightness"), "0\n")
         write(self.fs.state_file, "180")
         rep = self.recover()
         self.assertTrue(rep["ok"], rep)
@@ -221,7 +137,7 @@ class RecoverTest(unittest.TestCase):
                          {"available": True, "socket": "/run/user/1000/gamescope-0", "woken": True})
         self.assertEqual(rep["display"]["kscreen"], {"available": False})
         self.assertEqual(rep["backlight"]["restored"], 180)
-        self.assertEqual(self.fs.read(self.fs.bl, "brightness"), "180")
+        self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "180")
         self.assertEqual(rep["warnings"], [])
         # idempotent: a second run wakes again (harmless) and finds nothing to restore
         rep2 = self.recover()
@@ -246,20 +162,20 @@ class RecoverTest(unittest.TestCase):
         self.fs.unbind(2)
         g = self.fs.add_gadget("deckctl_hid")
         self.fs.add_gadget("other_gadget")   # not ours: must survive
-        write(os.path.join(self.fs.bl, "brightness"), "0\n")
+        write(os.path.join(self.fs.backlight, "brightness"), "0\n")
         write(self.fs.state_file, "180")
         rep = self.recover()
         self.assertTrue(rep["ok"], rep)
         self.assertEqual(rep["neptune"]["rebound"], ["3-3:1.0", "3-3:1.2"])
         self.assertEqual(rep["neptune"]["still_captured"], [])
-        self.assertEqual(self.fs.read(self.fs.usbhid, "bind"), "3-3:1.2")
+        self.assertEqual(read(os.path.join(self.fs.usbhid, "bind")), "3-3:1.2")
         self.assertEqual(len(rep["gadgets"]), 1)
         self.assertTrue(rep["gadgets"][0]["removed"])
         self.assertTrue(rep["gadgets"][0]["unbound"])
         self.assertFalse(os.path.exists(g))
         self.assertTrue(os.path.isdir(os.path.join(self.fs.configfs, "usb_gadget", "other_gadget")))
         self.assertEqual(rep["backlight"]["restored"], 180)
-        self.assertEqual(self.fs.read(self.fs.bl, "brightness"), "180")
+        self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "180")
         self.assertFalse(os.path.exists(self.fs.state_file))
         # interfaces are back on usbhid (KernelBinder) -> second run does nothing
         self.assertFalse(neptune.find_neptune(self.fs.sys, self.fs.dev).captured)
@@ -269,8 +185,8 @@ class RecoverTest(unittest.TestCase):
         self.assertEqual(rep2["neptune"]["rebound"], [])
         self.assertEqual(rep2["gadgets"], [])
         self.assertIsNone(rep2["backlight"]["restored"])
-        self.assertEqual(self.fs.read(self.fs.usbhid, "bind"), "")
-        self.assertEqual(self.fs.read(self.fs.bl, "brightness"), "180")
+        self.assertEqual(read(os.path.join(self.fs.usbhid, "bind")), "")
+        self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "180")
 
     def test_recover_reports_failed_rebind(self):
         """A rebind that does not stick must make the report ok=False (the backend toasts it)."""
@@ -317,18 +233,18 @@ class RecoverTest(unittest.TestCase):
 
     def test_recover_without_neptune_or_backlight(self):
         shutil.rmtree(os.path.join(self.fs.devices, "3-3"))
-        shutil.rmtree(self.fs.bl)
+        shutil.rmtree(self.fs.backlight)
         rep = self.recover()
         self.assertTrue(rep["ok"], rep)
         self.assertEqual(rep["neptune"], {"present": False})
         self.assertFalse(rep["backlight"]["available"])
 
     def test_saved_zero_never_restores_to_dark(self):
-        write(os.path.join(self.fs.bl, "brightness"), "0\n")
+        write(os.path.join(self.fs.backlight, "brightness"), "0\n")
         write(self.fs.state_file, "0")
         rep = self.recover()
         self.assertEqual(rep["backlight"]["restored"], 127)
-        self.assertEqual(self.fs.read(self.fs.bl, "brightness"), "127")
+        self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "127")
 
     def test_remove_gadget_missing(self):
         rep = guard.remove_configfs_gadget(os.path.join(self.fs.configfs, "usb_gadget", "nope"))

@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 
 import _path  # noqa: F401
@@ -83,13 +85,13 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(demo.resolved_transport, "raw")
         ks = config_from_args(ap.parse_args(["run", "--screen-off", "--screen-method", "kscreen"]))
         self.assertEqual(ks.screen_method, "kscreen")
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             ap.parse_args(["run", "--screen-method", "dpms"])
         args = ap.parse_args(["probe", "--seconds", "3"])
         self.assertEqual(args.seconds, 3.0)
         self.assertEqual(ap.parse_args(["status"]).cmd, "status")
         self.assertEqual(ap.parse_args(["recover"]).cmd, "recover")
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             ap.parse_args(["run", "--profile", "ds4"])
 
 
