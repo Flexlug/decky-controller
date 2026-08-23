@@ -1,16 +1,7 @@
-"""Session state machine (docs/ARCHITECTURE.md, "Session state machine").
+"""Session state machine: IDLE -> CAPTURING -> GADGET_UP -> WAITING_HOST -> ACTIVE -> STOPPING -> STOPPED.
 
-IDLE -> CAPTURING (screen off [gamescope sleep / kscreen dpms / backlight], source.open: unbind usbhid /
-                   claim / lizard-off / heartbeat)
-     -> GADGET_UP (transport.start(profile))
-     -> WAITING_HOST (until the UDC reports ``configured``)
-     -> ACTIVE (source.read -> profile.pack -> transport.send; OUT reports logged / rumble)
-     -> STOPPING -> STOPPED
-
-* kill-combo (hold ``kill_hold_ms``) is armed from CAPTURING on and is never forwarded;
-* cable unplug in ACTIVE (UDC state leaves ``configured`` for > ``unplug_grace_s``) -> ``kill unplug``;
-* SIGTERM/SIGINT -> ``request_stop("signal")``; any exception -> ``kill error`` + exit code 1;
-* teardown always runs in ``finally`` and every step is individually guarded.
+The kill combo is armed from CAPTURING on and never forwarded; unplug = UDC leaves ``configured`` for
+longer than ``unplug_grace_s``; teardown always runs in ``finally`` with every step guarded.
 """
 from __future__ import annotations
 
@@ -111,9 +102,8 @@ class Session:
         self._lock = threading.Lock()
         self.last_feedback: Optional[Feedback] = None
 
-    # --- public API ------------------------------------------------------------------
     def request_stop(self, reason: str = KILL_SIGNAL) -> None:
-        """Thread/signal-safe: ask the loop to stop with ``reason`` (first reason wins)."""
+        """Thread/signal-safe; the first reason wins."""
         with self._lock:
             if self.kill_reason is None:
                 self.kill_reason = reason
@@ -156,7 +146,6 @@ class Session:
             self._teardown()
         return exit_code
 
-    # --- internals -------------------------------------------------------------------
     def _set_state(self, state: str, detail: str = "") -> None:
         self.state = state
         log.info("state %s %s", state, detail)
@@ -186,7 +175,7 @@ class Session:
         if self.udc_state is not None:
             udc_state = self.udc_state()
             if udc_state is not None:
-                # sysfs is the authority (raw-gadget may lag on DISCONNECT); transport must agree
+                # sysfs is the authority (raw-gadget may lag on DISCONNECT), the transport must agree
                 return udc_state == "configured" and self.transport.connected()
         return self.transport.connected()
 
@@ -248,8 +237,7 @@ class Session:
         if self.state not in (STOPPING, STOPPED):
             self._set_state(STOPPING, f"reason={reason}")
         self.events.kill(reason)
-        # Always stop the transport (stop() is idempotent by protocol): start() may have raised after
-        # partially bringing the gadget up, and the session must not leave it live on the cable.
+        # stop() is idempotent and runs even if start() raised half-way: never leave a gadget live on the cable
         try:
             self.transport.stop()
         except Exception as exc:  # noqa: BLE001

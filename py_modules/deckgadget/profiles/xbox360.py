@@ -1,19 +1,16 @@
-"""Xbox 360 wired controller (XInput) profile — ported from the original raw-gadget spike.
+"""Xbox 360 wired controller (XInput) profile.
 
-Descriptors are a faithful clone of the wired Xbox 360 pad (VID 045E PID 028E, four
-vendor-specific interfaces with the undocumented 0x21 descriptors).  Verified on real
-hardware against Linux ``xpad`` and Windows 11 ``xusb22.sys`` (docs/HARDWARE.md,
-"Kernel gadget stack"): the host accepts our empty reply to the capability requests
-(``0xc1/0x01``), so no MS OS descriptor / XSM3 handling is needed.
+Descriptors clone the wired Xbox 360 pad (VID 045E PID 028E, four vendor-specific interfaces with the
+undocumented 0x21 descriptors).  Verified against Linux ``xpad`` and Windows 11 ``xusb22.sys``: both accept
+an empty reply to the capability requests (``0xc1/0x01``), so no MS OS descriptor / XSM3 handling is needed.
 
-Input report (20 bytes, EP 0x81; Microsoft XINPUT_GAMEPAD bit layout, cf. XInput.h and
+Input report (20 bytes, EP 0x81; XINPUT_GAMEPAD bit layout, cf. XInput.h and
 https://www.partsnotincluded.com/understanding-the-xbox-360-wired-controllers-usb-data/)::
 
     00 14 | buttons u16 LE | LT u8 | RT u8 | LX s16 | LY s16 | RX s16 | RY s16 | 6 bytes reserved
 
-Output reports (EP 0x01): ``00 08 00 LL RR 00 00 00`` rumble (LL big/left motor, RR
-small/right motor), ``01 03 xx`` LED pattern.  On Windows the spike also saw ``02 08 03 ..``
-(not decoded yet; reported as ``kind="unknown"``).
+Output reports (EP 0x01): ``00 08 00 LL RR 00 00 00`` rumble (LL big/left, RR small/right motor),
+``01 03 xx`` LED pattern; Windows also sends ``02 08 03 ..`` (undecoded, reported as ``kind="unknown"``).
 """
 from __future__ import annotations
 
@@ -48,14 +45,14 @@ XB_B = 0x2000
 XB_X = 0x4000
 XB_Y = 0x8000
 
-#: settings target name (``paddles.*`` in docs/ARCHITECTURE.md) -> XInput bit
+#: paddle setting value -> XInput bit
 XB_BY_TARGET: Dict[str, int] = {
     "A": XB_A, "B": XB_B, "X": XB_X, "Y": XB_Y, "LB": XB_LB, "RB": XB_RB, "L3": XB_L3, "R3": XB_R3,
     "VIEW": XB_BACK, "MENU": XB_START,
     "DPAD_UP": XB_DPAD_UP, "DPAD_DOWN": XB_DPAD_DOWN, "DPAD_LEFT": XB_DPAD_LEFT, "DPAD_RIGHT": XB_DPAD_RIGHT,
 }
 
-#: default Deck -> Xbox mapping (docs/ARCHITECTURE.md): A/B/X/Y, L1/R1 -> LB/RB, L3/R3, View -> Back, Menu -> Start, D-pad
+#: default Deck -> Xbox mapping (View -> Back, Menu -> Start)
 DEFAULT_BUTTON_MAP = (
     (S.BTN_A, XB_A), (S.BTN_B, XB_B), (S.BTN_X, XB_X), (S.BTN_Y, XB_Y),
     (S.BTN_L1, XB_LB), (S.BTN_R1, XB_RB), (S.BTN_L3, XB_L3), (S.BTN_R3, XB_R3),
@@ -69,7 +66,7 @@ PADDLE_BITS = {"L4": S.BTN_L4, "L5": S.BTN_L5, "R4": S.BTN_R4, "R5": S.BTN_R5}
 REPORT_LEN = 20
 _REPORT = struct.Struct("<BBHBBhhhh6x")
 
-# --- descriptors (byte-exact copy of the spike, which is a clone of the real pad) -------------
+# byte-exact clone of the real pad's descriptors
 EP_IN_DESC = endpoint_descriptor(0x81, 0x03, 0x20, 4)    # interrupt IN, 32 bytes, bInterval 4
 EP_OUT_DESC = endpoint_descriptor(0x01, 0x03, 0x20, 8)   # interrupt OUT, 32 bytes, bInterval 8
 CONFIG_BODY = bytes([
@@ -118,7 +115,6 @@ class Xbox360Profile:
 
     def __init__(self, paddles: Optional[Dict[str, str]] = None, forward_steam: bool = False,
                  forward_qam: bool = False, invert_y: bool = False) -> None:
-        # Build the (canonical bit -> xbox bit) table once; the hot path just loops over it.
         table = list(DEFAULT_BUTTON_MAP)
         if forward_steam:
             table.append((S.BTN_STEAM, XB_GUIDE))
@@ -132,11 +128,10 @@ class Xbox360Profile:
                 raise ValueError(f"unknown paddle target {target!r}")
             table.append((PADDLE_BITS[paddle.upper()], XB_BY_TARGET[action]))
         self._table = tuple(table)
-        # Deck sticks report +Y = up, same as XInput — no inversion by default.
+        # Deck sticks report +Y = up, same as XInput
         self._y_sign = -1 if invert_y else 1
         self._last_report = _REPORT.pack(0x00, REPORT_LEN, 0, 0, 0, 0, 0, 0, 0)
 
-    # --- Profile protocol ----------------------------------------------------------
     def map_buttons(self, canonical: int) -> int:
         xbox_buttons = 0
         for canonical_bit, xbox_bit in self._table:
@@ -160,7 +155,7 @@ class Xbox360Profile:
             return None
         kind, length = data[0], data[1]
         if kind == 0x00 and length == 0x08 and len(data) >= 5:
-            # 00 08 00 LL RR 00 00 00 — rumble, motor speeds 0..255
+            # 00 08 00 LL RR 00 00 00 — motor speeds 0..255
             return Feedback("rumble", left=data[3] * 257, right=data[4] * 257, raw=bytes(data))
         if kind == 0x01 and length == 0x03 and len(data) >= 3:
             return Feedback("led", value=data[2], raw=bytes(data))
@@ -170,13 +165,13 @@ class Xbox360Profile:
         return DESCRIPTORS
 
     def hid_function(self) -> Optional[HidFunction]:
-        return None  # vendor-specific interface: cannot be expressed with f_hid
+        return None  # f_hid cannot expose the vendor-specific interface
 
     def handle_control(self, setup: SetupPacket, read_data: ReadData) -> Optional[bytes]:
         if setup.req_type == USB_TYPE_STANDARD:
-            return None  # interface-level standard requests we don't know -> STALL
-        # Class/vendor requests (xusb22 capability queries 0xc1/0x01, LED/XSM3 ...): an empty
-        # IN reply and a plain ACK for OUT are accepted by Linux xpad and Windows xusb22.
+            return None
+        # class/vendor requests (xusb22 capability queries 0xc1/0x01, LED/XSM3 …): an empty IN reply and a
+        # plain ACK for OUT are accepted by Linux xpad and Windows xusb22
         if setup.dir_in:
             return b""
         if setup.wLength:

@@ -1,8 +1,4 @@
-"""Run configuration: parsing/validation of the CLI options shared by ``run``/``demo``.
-
-Mirrors the ``Settings`` object of docs/ARCHITECTURE.md (profile, transport, kill_combo,
-kill_hold_ms, screen_off, touch_wake_seconds, paddles) and resolves ``transport=auto``.
-"""
+"""Run options shared by ``run``/``demo``: allowed values, validation, ``transport=auto`` resolution."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,8 +12,7 @@ KILL_COMBOS = ("L4+R4", "L5+R5", "L4+L5+R4+R5", "STEAM+QAM")
 PADDLE_NAMES = ("L4", "L5", "R4", "R5")
 PADDLE_TARGETS = ("none", "A", "B", "X", "Y", "LB", "RB", "L3", "R3", "VIEW", "MENU",
                   "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT")
-# How the screen is turned off while active: auto = gamescope display sleep (Gaming Mode) ->
-# kscreen-doctor DPMS (Desktop Mode) -> backlight 0 (only dims the OLED panel).
+# auto = gamescope display sleep (Gaming Mode) -> kscreen DPMS (Desktop Mode) -> backlight 0 (only dims the OLED)
 SCREEN_METHODS = ("auto", "gamescope", "kscreen", "backlight")
 
 DEFAULT_PROFILE = "xbox360"
@@ -42,13 +37,13 @@ def resolve_transport(profile: str, transport: str) -> str:
     if transport == "auto":
         return "raw" if profile == "xbox360" else "hid"
     if profile == "xbox360" and transport == "hid":
-        # f_hid cannot expose the Xbox 360 vendor-specific (0xFF/0x5D) interface — see docs/HARDWARE.md ("Kernel gadget stack").
+        # f_hid cannot expose the Xbox 360 vendor-specific (0xFF/0x5D) interface
         raise ConfigError("profile xbox360 requires transport raw (configfs f_hid cannot emulate XInput)")
     return transport
 
 
 def parse_kill_combo(text: str) -> int:
-    """``"L4+R4"`` -> canonical button mask. Only the combos listed in docs/ARCHITECTURE.md are allowed."""
+    """``"L4+R4"`` -> canonical button mask; only ``KILL_COMBOS`` are accepted."""
     normalized = "+".join(part.strip().upper() for part in text.split("+") if part.strip())
     if normalized not in KILL_COMBOS:
         raise ConfigError(f"unsupported kill combo {text!r} (expected one of {KILL_COMBOS})")
@@ -96,17 +91,17 @@ def validate_paddles(paddles: Dict[str, str]) -> Dict[str, str]:
 @dataclass
 class RunConfig:
     profile: str = DEFAULT_PROFILE
-    transport: str = DEFAULT_TRANSPORT          # as requested (may be "auto")
+    transport: str = DEFAULT_TRANSPORT
     kill_combo: str = DEFAULT_KILL_COMBO
     kill_hold_ms: int = DEFAULT_KILL_HOLD_MS
     screen_off: bool = False
     touch_wake_seconds: float = DEFAULT_TOUCH_WAKE_SECONDS
-    screen_method: str = DEFAULT_SCREEN_METHOD    # auto | gamescope | kscreen | backlight
+    screen_method: str = DEFAULT_SCREEN_METHOD
     paddles: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_PADDLES))
     log_file: Optional[str] = None
-    demo: bool = False                          # demo source instead of the Neptune controller
-    udc: Optional[str] = None                   # force a UDC name (default: first in /sys/class/udc)
-    forward_steam: bool = False                 # Steam -> Guide (off by default, see docs/ARCHITECTURE.md)
+    demo: bool = False
+    udc: Optional[str] = None                   # default: first in /sys/class/udc
+    forward_steam: bool = False                 # Steam -> Guide; off by default so the Deck's own buttons stay private
     forward_qam: bool = False
 
     def __post_init__(self) -> None:

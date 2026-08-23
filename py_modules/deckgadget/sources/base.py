@@ -11,7 +11,7 @@ class InputSource(Protocol):
     name: str
 
     def open(self) -> None:
-        """Acquire the device (for Neptune: unbind usbhid, claim interface, lizard off, heartbeat)."""
+        """Take exclusive ownership of the device."""
 
     def read(self, timeout: float) -> Optional[ControllerState]:
         """Block up to ``timeout`` seconds for the next state; ``None`` on timeout / non-state packet."""

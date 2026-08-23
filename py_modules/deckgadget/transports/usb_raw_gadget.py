@@ -1,34 +1,21 @@
-"""Production raw-gadget transport (port of the original raw-gadget spike).
+"""raw-gadget transport: user space answers every EP0 request itself (descriptors come from the
+:class:`Profile`), enables the report endpoints on SET_CONFIGURATION and moves data with EP_WRITE /
+EP_READ.  Three worker threads (event loop, IN writer, OUT reader); ioctls go through ``util.ioctl``
+(ctypes, GIL released).
 
-``/dev/raw-gadget`` (``CONFIG_USB_RAW_GADGET``) hands the whole device to user space: we
-answer every EP0 request ourselves (descriptors come from the :class:`Profile`), enable
-the report endpoints on SET_CONFIGURATION and move data with ``EP_WRITE``/``EP_READ``.
-All ioctls go through ``util.ioctl`` (ctypes, GIL released) so the three worker threads
-(event loop, IN writer, OUT reader) run truly concurrently.
+Learned on hardware (``drivers/usb/gadget/legacy/raw_gadget.c``):
 
-Teardown subtleties learned on hardware (docs/HARDWARE.md):
+* ioctls have no timeouts — a blocked EP_READ/EP_WRITE/EVENT_FETCH is interrupted with
+  :data:`~deckgadget.transports.base.CANCEL_SIGNAL` and returns EINTR.
+* EP_DISABLE / VBUS_DRAW (and EP_SET_HALT/EP_CLEAR_HALT/EP_SET_WEDGE) take their value *in the ioctl
+  argument*, not through a buffer; passing a pointer made every disable fail with EBUSY and leaked the
+  endpoints in raw-gadget's bookkeeping until the fd was closed.
+* After DISCONNECT/RESET the UDC has stopped the endpoints but raw-gadget still counts them enabled
+  until EP_DISABLE: join the data threads first, then disable each handle once (EINVAL = already gone).
+* A half-answered EP0 request makes raw-gadget answer every further setup packet with -EBUSY while
+  ``ep0_in_pending``/``ep0_out_pending`` is set, so any failure inside control handling ends in EP0_STALL.
 
-* raw-gadget ioctls have no timeouts; a blocked ``EP_READ``/``EP_WRITE``/``EVENT_FETCH`` is
-  ``wait_for_completion_interruptible`` in the kernel, so we interrupt the worker threads
-  with :data:`~deckgadget.transports.base.CANCEL_SIGNAL` (``pthread_kill``) and they see
-  ``EINTR``.
-* ``EP_DISABLE`` / ``VBUS_DRAW`` (and ``EP_SET_HALT``/``EP_CLEAR_HALT``/``EP_SET_WEDGE``) take
-  their value *in the ioctl argument itself*, not through a buffer (raw_gadget.c
-  ``raw_ioctl_ep_disable``: ``int i = value``; ``raw_ioctl_vbus_draw``:
-  ``usb_gadget_vbus_draw(gadget, 2 * value)``).  The first spike passed a pointer, so every
-  disable failed with ``EBUSY`` ("invalid endpoint") — the "cosmetic EBUSY after DISCONNECT"
-  in the spike notes — and the endpoints stayed enabled in raw-gadget's bookkeeping until the
-  fd was closed (a later ``EP_ENABLE`` could then run out of endpoints).
-* After ``DISCONNECT``/``RESET`` the UDC has already stopped the endpoints, but raw-gadget
-  still counts them as enabled until ``EP_DISABLE``.  We join the IN/OUT threads first (so no
-  URB is queued), then disable each handle once; ``EINVAL`` (already disabled) is expected.
-* A half-answered EP0 request is fatal: raw-gadget answers every further setup packet with
-  ``-EBUSY`` while ``ep0_in_pending``/``ep0_out_pending`` is set (``gadget_setup``), so any
-  failure inside control handling is terminated with ``EP0_STALL``.
-
-ABI: ``include/uapi/linux/usb/raw_gadget.h`` (struct sizes: usb_raw_init 257,
-usb_raw_event 8 + data, usb_raw_ep_io 8 + data, usb_endpoint_descriptor 9,
-usb_raw_eps_info 30*32 = 960).
+ABI: ``include/uapi/linux/usb/raw_gadget.h``.
 """
 from __future__ import annotations
 
@@ -57,7 +44,6 @@ from .base import (
 
 log = get_logger("raw_gadget")
 
-# --- raw_gadget.h ---------------------------------------------------------------------
 UDC_NAME_LENGTH_MAX = 128
 SZ_INIT = UDC_NAME_LENGTH_MAX * 2 + 1      # struct usb_raw_init {u8 driver[128]; u8 device[128]; u8 speed}
 SZ_EVENT = 8                               # struct usb_raw_event {u32 type; u32 length; u8 data[]}
@@ -155,9 +141,8 @@ class RawGadgetDevice:
         return ioctl(self.fd, USB_RAW_IOCTL_EP_ENABLE, buffer)
 
     def ep_disable(self, handle: int) -> None:
-        # Handle travels in the ioctl argument (raw_gadget.c raw_ioctl_ep_disable: ``int i = value``);
-        # util.ioctl maps an int to c_void_p(value).  EBUSY = bad handle / gadget unbound,
-        # EINVAL = not enabled (or a URB still queued on it).
+        # handle by value (raw_ioctl_ep_disable: ``int i = value``); EBUSY = bad handle / gadget unbound,
+        # EINVAL = not enabled or a URB still queued
         ioctl(self.fd, USB_RAW_IOCTL_EP_DISABLE, int(handle))
 
     def ep_write(self, handle: int, data: bytes) -> int:
@@ -170,10 +155,8 @@ class RawGadgetDevice:
         ioctl(self.fd, USB_RAW_IOCTL_CONFIGURE)
 
     def vbus_draw(self, milliamps: int) -> None:
-        # By value, in 2 mA units (raw_gadget.c raw_ioctl_vbus_draw: ``usb_gadget_vbus_draw(gadget,
-        # 2 * value)``) — i.e. the same number as bMaxPower (250 for 500 mA), like the reference
-        # examples' ``usb_raw_vbus_draw(fd, usb_config.bMaxPower)``.  dwc3 has no .vbus_draw ->
-        # EOPNOTSUPP from the kernel; callers treat that as harmless.
+        # by value in 2 mA units, i.e. the same number as bMaxPower (raw_ioctl_vbus_draw:
+        # ``usb_gadget_vbus_draw(gadget, 2 * value)``); dwc3 has no .vbus_draw -> EOPNOTSUPP, harmless
         ioctl(self.fd, USB_RAW_IOCTL_VBUS_DRAW, max(0, int(milliamps)) // 2)
 
     def eps_info(self) -> List[Tuple[str, int, int, int]]:
@@ -220,7 +203,6 @@ class UsbRawGadgetTransport:
         self.control_requests = 0
         self.generation = 0
 
-    # --- Transport protocol -----------------------------------------------------------
     @property
     def error(self) -> Optional[BaseException]:
         return self._error
@@ -288,17 +270,14 @@ class UsbRawGadgetTransport:
         device = self.device
         if device is None:
             return
-        # 1. event thread (blocked in EVENT_FETCH) -> EINTR
         join_with_interrupts([self._event_thread], timeout=1.5)
-        # 2. data threads + endpoint disable
         self._teardown_eps(reason="stop")
-        # 3. closing the fd unregisters the gadget driver; the UDC drops off the bus
+        # closing the fd unregisters the gadget driver; the UDC drops off the bus
         self.device = None
         device.close()
         self._event_thread = None
         log.info("raw-gadget down (sent=%d dropped=%d)", self._metrics.sent, self._slot.dropped)
 
-    # --- event loop ------------------------------------------------------------------
     def _event_loop(self) -> None:
         device = self.device
         assert device is not None
@@ -349,14 +328,8 @@ class UsbRawGadgetTransport:
 
     @staticmethod
     def _abort_control(device: RawGadgetDevice) -> None:
-        """Terminate a half-handled EP0 request with STALL (best effort).
-
-        raw-gadget keeps ``ep0_in_pending``/``ep0_out_pending`` set until an EP0 read/write
-        completes or ``EP0_STALL`` is issued and meanwhile answers *every* new setup packet with
-        ``-EBUSY`` ("stalling, request already pending") — the device could never enumerate again
-        until the daemon restarts.  ``EBUSY`` from the stall itself means nothing was pending
-        (the reply had already gone out), which is fine.
-        """
+        """STALL a half-handled EP0 request; otherwise raw-gadget answers every further setup packet
+        with -EBUSY and the device never enumerates again.  EBUSY from the stall itself = nothing pending."""
         try:
             device.ep0_stall()
         except OSError as exc:
@@ -373,10 +346,8 @@ class UsbRawGadgetTransport:
             log.debug("ep0: %s", setup.describe())
 
         def reply(data: bytes) -> None:
-            # raw-gadget marks an IN request with wLength == 0 as *OUT*-pending (gadget_setup:
-            # ``if ((bRequestType & USB_DIR_IN) && wLength) ep0_in_pending else ep0_out_pending``),
-            # so EP0_WRITE would fail with EBUSY ("wrong direction"): there is no data stage —
-            # complete it with the zero-length status read, exactly like ack().
+            # raw-gadget marks an IN request with wLength == 0 as OUT-pending (gadget_setup), so EP0_WRITE
+            # would fail with EBUSY: finish it with the zero-length status read instead
             if setup.wLength == 0:
                 device.ep0_read(0)
             else:
@@ -408,7 +379,7 @@ class UsbRawGadgetTransport:
                 if descriptor_type == USB_DT_OTHER_SPEED_CONFIG:
                     return (reply(descriptors.config_descriptor(USB_DT_OTHER_SPEED_CONFIG))
                             if descriptors.high_speed and self.speed == "high" else stall())
-                return stall()  # BOS, MS OS 0xEE, ... -> STALL (accepted by Linux & Windows, see spike)
+                return stall()  # BOS, MS OS 0xEE, …: STALL is accepted by Linux and Windows
             if request == USB_REQ_SET_CONFIGURATION and not setup.dir_in:
                 self._set_configuration(setup.wValue & 0xFF)
                 return ack()
@@ -440,7 +411,6 @@ class UsbRawGadgetTransport:
         if setup.wLength == 0:
             return ack()
 
-    # --- endpoints -------------------------------------------------------------------
     def _set_configuration(self, value: int) -> None:
         with self._ep_lock:
             self._teardown_eps(reason="reconfigure")
@@ -454,11 +424,10 @@ class UsbRawGadgetTransport:
                 try:
                     device.vbus_draw(descriptors.max_power_ma)
                 except OSError as exc:
-                    log.debug("vbus_draw: %s", exc)   # dwc3: EOPNOTSUPP (no .vbus_draw) — harmless
+                    log.debug("vbus_draw: %s", exc)
                 device.configure()
             except OSError as exc:
-                # Free whatever got enabled so the host's retry starts from a clean slate; the
-                # event loop STALLs the pending SET_CONFIGURATION.
+                # free whatever got enabled so the host's retry starts clean; the event loop STALLs the request
                 log.warning("SET_CONFIGURATION(%d) failed: %s — rolling endpoints back", value, exc)
                 self._teardown_eps(reason="configure-failed")
                 raise
@@ -488,9 +457,8 @@ class UsbRawGadgetTransport:
             handles, self._ep_in, self._ep_out = (self._ep_in, self._ep_out), None, None
             if device is None:
                 return
-            # With the data threads joined no URB can be queued, so one EP_DISABLE per handle is
-            # enough.  Only while a thread is still stuck in EP_READ/EP_WRITE may the kernel answer
-            # EINVAL ("waiting for urb completion") — retry briefly in that case alone.
+            # with the data threads joined one EP_DISABLE per handle is enough; only a thread still stuck in
+            # EP_READ/EP_WRITE makes the kernel answer EINVAL ("waiting for urb completion") — retry then
             attempts = 1 if joined else 10
             for handle in handles:
                 if handle is None:

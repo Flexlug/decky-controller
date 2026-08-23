@@ -1,19 +1,7 @@
-"""Decky Controller — Decky Loader backend (runs as root, plugin.json ``"flags": ["root"]``).
+"""Decky Loader backend (root, stdlib only): frontend callables, daemon supervisor, settings store.
 
-Responsibilities (see docs/ARCHITECTURE.md):
-
-* the callables used by the frontend: ``get_status`` / ``start`` / ``stop`` / ``get_settings`` /
-  ``set_settings`` / ``get_diagnostics`` — every one of them returns a JSON dict and never raises;
-* supervising the controller daemon (``/usr/bin/python3 -m deckgadget run …``, docs/ARCHITECTURE.md) as a child
-  process, translating its JSON-lines stdout into ``status`` / ``toast`` events (``decky.emit``);
-* guaranteeing a full rollback (``python3 -m deckgadget recover``) at plugin load, after *every* daemon exit,
-  inside ``stop()`` and on unload / uninstall — all volatile kernel state must never outlive a session;
-* a tiny JSON settings store in ``DECKY_PLUGIN_SETTINGS_DIR/settings.json`` (stdlib only).
-
-The ``deckgadget`` package is deliberately **never imported** here — it is only ever executed as a subprocess
-(``cwd=<plugin>/py_modules``), so a broken core package cannot take the Decky backend down with it.
-
-Runtime: SteamOS Python 3.13, stdlib only (no pip packages).
+``deckgadget`` is never imported here — it only runs as a subprocess (``cwd=<plugin>/py_modules``), so a
+broken core package cannot take the Decky backend down with it.
 """
 from __future__ import annotations
 
@@ -27,12 +15,9 @@ import sys
 import time
 from typing import Any, Optional
 
-# ---------------------------------------------------------------------------------------------------------
-# decky import — with a tiny shim so ``python3 -c "import main"`` works on a dev machine without Decky Loader
-# ---------------------------------------------------------------------------------------------------------
 try:
-    import decky  # type: ignore[import-not-found]  # provided by Decky Loader at runtime
-except ImportError:  # pragma: no cover — local development / syntax checks only
+    import decky  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover — shim so ``import main`` works on a dev machine without Decky Loader
     import logging as _logging
     import tempfile as _tempfile
     import types as _types
@@ -57,22 +42,19 @@ except ImportError:  # pragma: no cover — local development / syntax checks on
 
 JsonDict = dict[str, Any]
 
-# ---------------------------------------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------------------------------------
 PLUGIN_NAME = "Decky Controller"
-PYTHON_BIN = "/usr/bin/python3"          # SteamOS system Python 3.13 (docs/ARCHITECTURE.md)
-DAEMON_MODULE = "deckgadget"             # executed as ``python3 -m deckgadget <cmd>`` in <plugin>/py_modules
+PYTHON_BIN = "/usr/bin/python3"          # the system interpreter, not Decky's bundled one
+DAEMON_MODULE = "deckgadget"
 
-STATUS_CLI_TIMEOUT_S = 5.0               # ``deckgadget status`` hard timeout
-STATUS_CACHE_TTL_S = 1.0                 # never spawn ``deckgadget status`` more often than this
-RECOVER_TIMEOUT_S = 30.0                 # ``deckgadget recover`` hard timeout
-STOP_TERM_GRACE_S = 3.0                  # SIGTERM → wait this long → SIGKILL
+STATUS_CLI_TIMEOUT_S = 5.0
+STATUS_CACHE_TTL_S = 1.0
+RECOVER_TIMEOUT_S = 30.0
+STOP_TERM_GRACE_S = 3.0                  # SIGTERM → wait this long → SIGKILL → wait STOP_KILL_GRACE_S
 STOP_KILL_GRACE_S = 2.0
-START_FIRST_EVENT_TIMEOUT_S = 2.0        # start() waits this long for the daemon's first event before answering
-STATUS_PERIOD_RUNNING_S = 2.0            # periodic ``status`` emit while the daemon runs
-STATUS_PERIOD_IDLE_S = 5.0               # connectivity poll (sysfs, cheap) while idle
-OUTPUT_RING_SIZE = 200                   # last N daemon stdout/stderr lines kept in memory for diagnostics
+START_FIRST_EVENT_TIMEOUT_S = 2.0
+STATUS_PERIOD_RUNNING_S = 2.0
+STATUS_PERIOD_IDLE_S = 5.0
+OUTPUT_RING_SIZE = 200
 LOG_TAIL_LINES = 50
 SUBPROCESS_LINE_LIMIT = 1 << 20
 
@@ -87,7 +69,7 @@ TOUCH_WAKE_RANGE = (1, 60)
 
 DEFAULT_SETTINGS: JsonDict = {
     "profile": "xbox360",
-    "transport": "auto",                 # auto = raw for xbox360, hid for hid_gamepad
+    "transport": "auto",
     "kill_combo": "L4+R4",
     "kill_hold_ms": 1500,
     "screen_off": True,
@@ -95,19 +77,15 @@ DEFAULT_SETTINGS: JsonDict = {
     "paddles": {"L4": "none", "L5": "none", "R4": "none", "R5": "none"},
 }
 
-# Session states as reported by the daemon (docs/ARCHITECTURE.md); "STOPPED" is mapped to "IDLE" for the Status.
 SESSION_STATES = ("IDLE", "CAPTURING", "GADGET_UP", "WAITING_HOST", "ACTIVE", "STOPPING")
 CAPTURED_STATES = frozenset({"CAPTURING", "GADGET_UP", "WAITING_HOST", "ACTIVE"})
 DEFAULT_METRICS: JsonDict = {"hz": 0, "reports": 0, "dropped": 0}
 
-NEPTUNE_VID, NEPTUNE_PID = "28de", "1205"   # built-in Steam Deck controller (docs/HARDWARE.md)
+NEPTUNE_VID, NEPTUNE_PID = "28de", "1205"   # built-in Steam Deck controller
 
 
-# ---------------------------------------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------------------------------------
 def _read_text(path: str) -> Optional[str]:
-    """Read a small (sysfs) text file; None if missing/unreadable."""
+    """Stripped file content; None if missing/unreadable."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             return f.read().strip()
@@ -116,7 +94,7 @@ def _read_text(path: str) -> Optional[str]:
 
 
 def _tail_file(path: str, count: int, max_bytes: int = 64 * 1024) -> list[str]:
-    """Last ``lines`` lines of a text file (reads at most ``max_bytes`` from the end)."""
+    """Last ``count`` lines, reading at most ``max_bytes`` from the end."""
     try:
         with open(path, "rb") as f:
             f.seek(0, os.SEEK_END)
@@ -166,12 +144,8 @@ def _plugin_version() -> str:
 
 
 def _daemon_env() -> dict[str, str]:
-    """Environment for every deckgadget subprocess.
-
-    Decky Loader is a PyInstaller bundle and exports LD_LIBRARY_PATH pointing into itself, which breaks the
-    system python3 (decky-loader issue #756) — it must be removed. PYTHONUNBUFFERED guarantees the daemon's
-    JSON-lines stdout arrives line by line.
-    """
+    """Decky Loader (a PyInstaller bundle) exports LD_LIBRARY_PATH into itself, which breaks the system
+    python3 (decky-loader issue #756) — drop it; PYTHONUNBUFFERED keeps the daemon's JSON lines unbuffered."""
     environment = {key: value for key, value in os.environ.items() if key != "LD_LIBRARY_PATH"}
     environment["PYTHONUNBUFFERED"] = "1"
     return environment
@@ -187,12 +161,8 @@ def _is_deckgadget_pid(pid: int) -> bool:
 
 
 def _sysfs_snapshot() -> JsonDict:
-    """Cheap, read-only view of the USB-role / controller state taken straight from sysfs.
-
-    Used (a) to detect connectivity changes between polls without spawning a process and (b) as a fallback
-    when the ``deckgadget status`` CLI is unavailable. The CLI remains the source of truth (docs/ARCHITECTURE.md);
-    everything here mirrors the facts in docs/HARDWARE.md.
-    """
+    """Read-only USB-role / controller view straight from sysfs: cheap connectivity polling between
+    ``deckgadget status`` calls, and the fallback when that CLI is unavailable (the CLI wins otherwise)."""
     snapshot: JsonDict = {
         "kernel": os.uname().release,
         "model": _read_text("/sys/class/dmi/id/product_name"),
@@ -203,7 +173,7 @@ def _sysfs_snapshot() -> JsonDict:
         "extcon": {"USB": 0, "USB-HOST": 0},
         "host_connected": False,
         "neptune_present": False,
-        # what the USB-C port physically sees while idle (udc_state is only meaningful once a gadget is bound)
+        # what the port physically sees; udc_state only means something once a gadget is bound
         "cable_power": None,
         "pd_contract_mv": None,
         "pd_contract_ma": None,
@@ -242,9 +212,8 @@ def _sysfs_snapshot() -> JsonDict:
                 except ValueError:
                     pass
         break
-    # Power on the port (EC "ACAD" supply) + the negotiated USB-PD contract (steamdeck_hwmon, found by name:
-    # in0 "PD Contract Voltage" mV, curr1 "PD Contract Current" mA). PC port = 5 V, PD charger = 15-20 V.
-    # Mirrors deckgadget.platform.usb_role.classify_cable (the CLI value wins when it is available).
+    # Port power (EC "ACAD" supply) + negotiated USB-PD contract (steamdeck_hwmon, found by name: in0 = mV,
+    # curr1 = mA). PC port = 5 V, PD charger = 15-20 V — same rule as usb_role.classify_cable.
     online = _read_text("/sys/class/power_supply/ACAD/online")
     if online in ("0", "1"):
         snapshot["cable_power"] = online == "1"
@@ -291,8 +260,8 @@ def _connectivity_signature(snapshot: JsonDict) -> tuple:
             snapshot.get("cable_kind"), snapshot.get("cable_power"), snapshot.get("pd_contract_mv"))
 
 
-# Canonical keys of ``deckgadget status`` are the Status keys themselves (docs/ARCHITECTURE.md); a few shorter
-# spellings are tolerated so a slightly different core build still renders a useful status.
+# Status keys ← ``deckgadget status`` keys; shorter spellings are tolerated so a slightly different core
+# build still renders a useful status.
 _CLI_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "udc_speed": ("udc_speed",),
     "kernel": ("kernel",),
@@ -304,7 +273,6 @@ _CLI_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "host_connected": ("host_connected", "connected"),
     "neptune_present": ("neptune_present", "neptune"),
     "neptune_captured": ("neptune_captured", "captured"),
-    # what the USB-C port physically sees (platform/usb_role.py); additive, all optional in Status
     "cable_power": ("cable_power",),
     "pd_contract_mv": ("pd_contract_mv",),
     "pd_contract_ma": ("pd_contract_ma",),
@@ -323,8 +291,7 @@ def _normalize_cli_status(raw: JsonDict) -> JsonDict:
                 continue
             value = raw[alias]
             if isinstance(value, dict):
-                # nested spellings: {"udc": {"name", "state"}}, {"neptune": {"present", "captured"}},
-                # {"drd": {"enabled"}}, {"extcon": {"USB": 0, "USB-HOST": 0}}
+                # nested spellings: {"udc": {"name", "state"}}, {"neptune": {"present", "captured"}}, {"drd": {"enabled"}}
                 if key == "udc_name":
                     result["udc_name"] = value.get("name")
                     result["udc_state"] = value.get("state")
@@ -347,11 +314,8 @@ def _normalize_cli_status(raw: JsonDict) -> JsonDict:
 
 
 def sanitize_settings(partial: Any, base: JsonDict) -> tuple[JsonDict, list[str]]:
-    """Merge ``partial`` onto ``base`` keeping only whitelisted values (docs/ARCHITECTURE.md).
-
-    Invalid values are skipped (the previous value is kept) and reported in the returned warnings list.
-    Integers are clamped to their sane range. Unknown keys are ignored silently.
-    """
+    """Merge ``partial`` onto ``base``: invalid values are skipped (previous kept) and reported in the
+    returned warnings, integers are clamped to their range, unknown keys are ignored."""
     merged = copy.deepcopy(base)
     warnings: list[str] = []
     if partial is None:
@@ -406,7 +370,7 @@ def resolve_transport(profile: str, transport: str) -> str:
 
 
 class SettingsStore:
-    """Minimal JSON settings persistence in DECKY_PLUGIN_SETTINGS_DIR/settings.json (no external modules)."""
+    """settings.json in DECKY_PLUGIN_SETTINGS_DIR, sanitized on load, written atomically."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -444,10 +408,9 @@ class SettingsStore:
         return copy.deepcopy(merged), warnings
 
 
-# ---------------------------------------------------------------------------------------------------------
-# Backend: daemon supervisor + status + settings (one instance per plugin lifetime)
-# ---------------------------------------------------------------------------------------------------------
 class _Backend:
+    """Daemon supervisor + status + settings; one instance per plugin lifetime."""
+
     def __init__(self) -> None:
         self.plugin_dir: str = decky.DECKY_PLUGIN_DIR
         self.py_modules_dir = os.path.join(self.plugin_dir, "py_modules")
@@ -459,7 +422,6 @@ class _Backend:
         self.version = _plugin_version()
         self.settings = SettingsStore(os.path.join(self.settings_dir, "settings.json"))
 
-        # daemon process
         self.process: Optional[asyncio.subprocess.Process] = None
         self.process_task: Optional[asyncio.Task[None]] = None
         self.process_args: list[str] = []
@@ -468,36 +430,33 @@ class _Backend:
         self.stop_requested = False
         self.first_event = asyncio.Event()  # set by the first daemon event or by its exit
 
-        # session view mirrored from daemon events
+        # mirrored from daemon events
         self.session_state = "IDLE"
         self.session_detail = ""
         self.active_profile: Optional[str] = None
         self.transport: Optional[str] = None
         self.metrics: JsonDict = dict(DEFAULT_METRICS)
-        self.screen_off: Optional[bool] = None   # last {"ev":"screen","off":…} of this session (None = none yet)
+        self.screen_off: Optional[bool] = None   # None until the daemon's first "screen" event
         self.last_error: Optional[str] = None
         self.last_kill: Optional[str] = None
         self.output: collections.deque[str] = collections.deque(maxlen=OUTPUT_RING_SIZE)
 
-        # serialization + caches
         self.operation_lock = asyncio.Lock()      # start / stop / recover never overlap
-        self.cli_lock = asyncio.Lock()     # one ``deckgadget status`` at a time
+        self.cli_lock = asyncio.Lock()
         self.cli_cache_time = 0.0
         self.cli_cache: Optional[JsonDict] = None
         self.cli_error: Optional[str] = None
         self.last_recover: Optional[JsonDict] = None
         self.status_task: Optional[asyncio.Task[None]] = None
 
-    # ---- lifecycle ------------------------------------------------------------------------------------
     async def startup(self) -> None:
         for directory in (self.settings_dir, self.runtime_dir, self.log_dir):
             try:
                 os.makedirs(directory, exist_ok=True)
             except OSError as e:
                 decky.logger.warning("cannot create %s: %s", directory, e)
-        # Hold op_lock for the whole load-time rollback: a start() arriving while the (up to 30 s)
-        # recover is still running must wait, otherwise recover would rebind usbhid / remove the gadget
-        # underneath the freshly spawned daemon.
+        # Hold the lock for the whole load-time rollback: a start() arriving while the (up to 30 s) recover
+        # still runs must wait, or recover would rebind usbhid / remove the gadget under the fresh daemon.
         async with self.operation_lock:
             await self._kill_stale_daemon()
             await self._recover("plugin-load")   # a previous backend instance may have died mid-session
@@ -514,12 +473,10 @@ class _Backend:
             self.status_task = None
         await self.stop(reason)
 
-    # ---- daemon control -------------------------------------------------------------------------------
     def daemon_alive(self) -> bool:
         return self.process is not None and self.process.returncode is None
 
     def _daemon_args(self, settings: JsonDict, profile: str) -> list[str]:
-        """CLI arguments for ``deckgadget run`` (docs/ARCHITECTURE.md)."""
         args = [
             "--profile", profile,
             "--transport", str(settings["transport"]),
@@ -588,8 +545,8 @@ class _Backend:
             self._write_pidfile(process.pid)
             self.process_task = asyncio.create_task(self._supervise(process), name="deckgadget-supervisor")
 
-        # Outside the lock (a fast-failing daemon needs the lock for its rollback): give the daemon a moment
-        # to report its first state so the caller gets something meaningful back.
+        # Outside the lock (a fast-failing daemon needs it for its rollback): wait briefly for the first event
+        # so the caller gets something meaningful back.
         try:
             await asyncio.wait_for(self.first_event.wait(), START_FIRST_EVENT_TIMEOUT_S)
         except asyncio.TimeoutError:
@@ -678,7 +635,7 @@ class _Backend:
             try:
                 event = json.loads(line)
             except ValueError:
-                decky.logger.info("[deckgadget] %s", line)   # plain text on stdout → just log it
+                decky.logger.info("[deckgadget] %s", line)
                 continue
             if isinstance(event, dict):
                 try:
@@ -701,7 +658,6 @@ class _Backend:
                 decky.logger.info("[deckgadget] %s", line)
 
     async def _on_daemon_event(self, event: JsonDict) -> None:
-        """JSON-lines protocol of ``deckgadget run`` (docs/ARCHITECTURE.md)."""
         kind = event.get("ev")
         if kind == "state":
             state = str(event.get("state") or "")
@@ -738,13 +694,12 @@ class _Backend:
                 await self._toast("Controller mode stopped", "Daemon was signalled to exit.", "info")
             # reason == "error": the exit handler reports it together with the error text
         elif kind == "screen":
-            # daemon extension: {"ev":"screen","off":bool} — authoritative Status.screen_off for this session
+            # authoritative Status.screen_off for this session
             self.screen_off = bool(event.get("off"))
             await self.emit_status()
         else:
             decky.logger.debug("[deckgadget] unhandled event %r", event)
 
-    # ---- rollback / CLI -------------------------------------------------------------------------------
     async def _run_cli(self, *args: str, timeout: float) -> tuple[Optional[int], str, str]:
         """Run ``python3 -m deckgadget <args>`` → (returncode, stdout, stderr); raises TimeoutError."""
         process = await asyncio.create_subprocess_exec(
@@ -768,11 +723,8 @@ class _Backend:
         return process.returncode, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
 
     async def _recover(self, reason: str) -> bool:
-        """``deckgadget recover`` — idempotent full rollback (gadget down, Neptune back to usbhid, backlight).
-
-        The CLI always exits 0 (docs/ARCHITECTURE.md); success is judged from its JSON report (``ok`` /
-        ``errors``), so a Deck left without its controller is surfaced as a toast + ``last_error``.
-        """
+        """Idempotent full rollback via ``deckgadget recover``. The CLI always exits 0; success is judged from
+        its JSON report (``ok`` / ``errors``) and a failure is surfaced as a toast + ``last_error``."""
         decky.logger.info("recover (%s)", reason)
         exit_code: Optional[int]
         try:
@@ -824,9 +776,8 @@ class _Backend:
             self.cli_cache, self.cli_error = data, error
             return data, error
 
-    # ---- status ---------------------------------------------------------------------------------------
     async def build_status(self, force: bool = False) -> JsonDict:
-        """Status dict per docs/ARCHITECTURE.md: hardware facts from the CLI (sysfs fallback) + daemon session."""
+        """Hardware facts from the CLI (sysfs fallback) + the daemon session view."""
         cli_status, cli_error = await self._cli_status(force)
         snapshot = _sysfs_snapshot()
         settings = self.settings.load()
@@ -846,7 +797,6 @@ class _Backend:
             "host_connected": snapshot["host_connected"],
             "neptune_present": snapshot["neptune_present"],
             "neptune_captured": False,
-            # what the port physically sees while idle (the CLI's values replace these when available)
             "cable_power": snapshot["cable_power"],
             "pd_contract_mv": snapshot["pd_contract_mv"],
             "pd_contract_ma": snapshot["pd_contract_ma"],
@@ -933,7 +883,6 @@ class _Backend:
             },
         }
 
-    # ---- events ---------------------------------------------------------------------------------------
     async def _emit(self, event: str, payload: JsonDict) -> None:
         try:
             await decky.emit(event, payload)
@@ -944,7 +893,6 @@ class _Backend:
         decky.logger.log({"error": 40, "warn": 30}.get(severity, 20), "toast: %s — %s", title, body)
         await self._emit("toast", {"title": title, "body": body, "severity": severity})
 
-    # ---- pidfile / stale daemon -----------------------------------------------------------------------
     def _write_pidfile(self, pid: int) -> None:
         try:
             with open(self.pidfile, "w", encoding="utf-8") as f:
@@ -1004,16 +952,10 @@ def _error(error: BaseException, **extra: Any) -> JsonDict:
     return {"ok": False, "error": str(error) or type(error).__name__, **extra}
 
 
-# ---------------------------------------------------------------------------------------------------------
-# Decky entry point
-# ---------------------------------------------------------------------------------------------------------
 class Plugin:
-    """Decky Loader entry point (docs/ARCHITECTURE.md).
-
-    Decky may call these either on an instance or with the class itself as ``self`` (older loaders do the
-    latter), so no state is kept on ``self`` — everything lives in the lazily created module-level backend.
-    Every callable catches all exceptions and answers ``{"ok": false, "error": "..."}``.
-    """
+    """Decky Loader entry point. Decky may call these on an instance or with the class itself as ``self``
+    (older loaders), so no state lives on ``self``; every callable answers ``{"ok": false, "error": …}``
+    instead of raising."""
 
     async def get_status(self) -> JsonDict:
         try:
@@ -1059,7 +1001,6 @@ class Plugin:
         except Exception as e:
             return _error(e)
 
-    # ---- Decky lifecycle ------------------------------------------------------------------------------
     async def _main(self) -> None:
         backend = _backend()
         decky.logger.info("%s %s backend starting (python %s, plugin dir %s)",
@@ -1084,5 +1025,5 @@ class Plugin:
             decky.logger.exception("uninstall cleanup failed")
 
     async def _migration(self) -> None:
-        # Nothing to migrate: settings have always lived in DECKY_PLUGIN_SETTINGS_DIR/settings.json.
+        # settings have always lived in DECKY_PLUGIN_SETTINGS_DIR/settings.json
         decky.logger.info("%s: no migration needed", PLUGIN_NAME)

@@ -1,15 +1,8 @@
-"""Locate the built-in Steam Deck controller ("Neptune", USB 28de:1205) and (un)bind usbhid.
+"""Locate the built-in controller ("Neptune", USB 28de:1205) and bind/unbind usbhid.
 
-Facts (docs/HARDWARE.md): the device sits on the *other* xHCI (04:00.4), so putting the USB-C
-port into device mode never disturbs it.  Interfaces:
-
-* ``<dev>:1.0`` HID boot mouse (lizard mode), ``<dev>:1.1`` HID boot keyboard (lizard mode),
-* ``<dev>:1.2`` HID controller (``hid-steam``; the 64-byte state reports),
-* ``<dev>:1.3/1.4`` CDC ACM — left alone.
-
-Exclusive capture = unbind 1.0/1.1/1.2 from ``usbhid`` via
-``/sys/bus/usb/drivers/usbhid/unbind`` and talk to interface 2 through usbfs
-(``/dev/bus/usb/BBB/DDD``).  Recovery rebinds via ``.../usbhid/bind``.
+It hangs off the *other* xHCI (04:00.4), so device mode on the USB-C port never disturbs it.
+Interfaces 1.0/1.1 are the lizard-mode HID mouse/keyboard, 1.2 the controller (hid-steam,
+64-byte state reports), 1.3/1.4 CDC ACM and left alone.
 """
 from __future__ import annotations
 
@@ -38,7 +31,7 @@ class Endpoint:
     attributes: int       # bmAttributes (3 = interrupt)
     max_packet: int
     interval: int
-    direction: str        # "in" / "out"
+    direction: str
 
     @property
     def is_in(self) -> bool:
@@ -53,7 +46,7 @@ class Endpoint:
 class Interface:
     name: str             # e.g. "3-3:1.2"
     number: int
-    driver: Optional[str] # currently bound driver (basename of the ``driver`` symlink) or None
+    driver: Optional[str]  # basename of the ``driver`` symlink, None when unbound
     usb_class: int = 0
     subclass: int = 0
     protocol: int = 0
@@ -226,7 +219,6 @@ class UsbhidBinder:
         except OSError as exc:
             if exc.errno in (16, 19):  # EBUSY already bound / ENODEV gone
                 return False
-            # Fall back to letting the core pick a driver (drivers_probe).
             probe = os.path.join(self.sysfs, "bus", "usb", "drivers_probe")
             try:
                 write_text(probe, interface_name)
@@ -250,12 +242,8 @@ def capture_interfaces(device: NeptuneDevice, binder: UsbhidBinder) -> List[str]
 
 def release_interfaces(device: Optional[NeptuneDevice], binder: UsbhidBinder,
                        names: Optional[List[str]] = None, errors: Optional[List[str]] = None) -> List[str]:
-    """Rebind interfaces to usbhid (all capture interfaces if ``names`` is None). Idempotent.
-
-    Returns the names that were rebound by us.  Bind failures never raise (every interface gets
-    its chance); they are logged and, when ``errors`` is given, appended to it as strings so the
-    caller (``guard.recover``) can report the rollback as failed instead of silently succeeding.
-    """
+    """Rebind interfaces to usbhid (all capture interfaces if ``names`` is None); returns the names rebound
+    by us. Bind failures never raise — every interface gets its chance — they are appended to ``errors``."""
     if names is None:
         names = []
         if device is not None:

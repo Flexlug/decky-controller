@@ -1,14 +1,10 @@
-"""Generic HID gamepad profile — the f_hid fallback from the original configfs spike.
+"""Generic HID gamepad profile (the f_hid fallback).
 
-Report descriptor (byte-exact copy of the spike, verified on a Linux host):
-Game Pad with X, Y, Z, Rz, Rx, Ry (6 x int8), hat switch (4 bits + 4 bits padding) and
-16 buttons -> 9-byte input report::
-
-    X Y Z Rz Rx Ry | hat (low nibble) | buttons u16 LE
-
-Mapping: X/Y = left stick, Z/Rz = right stick, Rx/Ry = triggers (0..127), hat = D-pad,
-buttons 1..16 = A B X Y L1 R1 L3 R3 VIEW MENU STEAM QAM L4 L5 R4 R5 (Steam/QAM only when
-enabled; paddles can be remapped via settings, otherwise they are their own buttons 13..16).
+Report descriptor (verified on a Linux host): Game Pad with X, Y, Z, Rz, Rx, Ry (6 x int8), hat switch
+(4 bits + 4 bits padding) and 16 buttons -> 9-byte input report ``X Y Z Rz Rx Ry | hat | buttons u16 LE``.
+X/Y = left stick, Z/Rz = right stick, Rx/Ry = triggers (0..127), hat = D-pad, buttons 1..16 =
+A B X Y L1 R1 L3 R3 VIEW MENU STEAM QAM L4 L5 R4 R5 (Steam/QAM only when forwarded; paddles default to
+their own buttons 13..16 unless remapped).
 """
 from __future__ import annotations
 
@@ -22,7 +18,7 @@ from .base import (
     USB_TYPE_STANDARD, Feedback, GadgetDescriptors, HidFunction, ReadData, SetupPacket, endpoint_descriptor,
 )
 
-VID = 0x1D6B   # as in the spike (Linux Foundation test id) — the PC already accepted this device
+VID = 0x1D6B   # Linux Foundation test id
 PID = 0x0104
 REPORT_LEN = 9
 
@@ -75,7 +71,7 @@ _HAT_TABLE = {
     (0, 0, 1, 0): 4, (0, 0, 1, 1): 5, (0, 0, 0, 1): 6, (1, 0, 0, 1): 7,
 }
 
-# HID button numbers (1-based) for the 16 buttons
+# 1-based HID button numbers
 (HB_A, HB_B, HB_X, HB_Y, HB_L1, HB_R1, HB_L3, HB_R3, HB_VIEW, HB_MENU, HB_STEAM, HB_QAM,
  HB_L4, HB_L5, HB_R4, HB_R5) = range(1, 17)
 
@@ -128,7 +124,7 @@ def s16_to_s8(value: int) -> int:
 
 
 def trigger_to_s8(raw: int) -> int:
-    """0..32767 -> 0..127 (the spike's descriptor has no unsigned axes)."""
+    """0..32767 -> 0..127 (the descriptor has no unsigned axes)."""
     raw = S.clamp_trigger(raw)
     return (raw * 127 + S.TRIGGER_MAX // 2) // S.TRIGGER_MAX
 
@@ -150,11 +146,11 @@ class HidGamepadProfile:
             table.append((S.BTN_STEAM, _hid_button_bit(HB_STEAM)))
         if forward_qam:
             table.append((S.BTN_QAM, _hid_button_bit(HB_QAM)))
-        dpad_extra = []  # paddle -> D-pad direction (routed through the hat)
+        dpad_extra = []  # paddles mapped to D-pad directions go through the hat
         for paddle, default_bit in PADDLE_DEFAULT.items():
             target = str((paddles or {}).get(paddle, "none")).upper()
             if target == "NONE":
-                table.append((PADDLE_BITS[paddle], default_bit))   # own button 13..16
+                table.append((PADDLE_BITS[paddle], default_bit))
             elif target in HB_BY_TARGET:
                 table.append((PADDLE_BITS[paddle], HB_BY_TARGET[target]))
             elif target in DPAD_TARGETS:
@@ -176,7 +172,7 @@ class HidGamepadProfile:
         for canonical_bit, dpad_bit in self._dpad_extra:
             if buttons & canonical_bit:
                 buttons |= dpad_bit
-        # HID Y axes are +down; the Deck reports +up.
+        # HID Y axes are +down, the Deck reports +up
         report = _REPORT.pack(s16_to_s8(state.lx), s16_to_s8(-state.ly), s16_to_s8(state.rx), s16_to_s8(-state.ry),
                               trigger_to_s8(state.lt), trigger_to_s8(state.rt), hat_from_buttons(buttons),
                               hid_buttons)

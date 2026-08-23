@@ -1,16 +1,7 @@
-"""Logging to stderr/file plus the JSON-lines event sink on stdout.
+"""stderr/file logging plus the JSON-lines event sink on stdout.
 
-The daemon's *stdout* is reserved for machine-readable events consumed by the
-Decky backend (``main.py``), one JSON object per line::
-
-    {"ev":"state","state":"ACTIVE","detail":"..."}
-    {"ev":"error","msg":"..."}
-    {"ev":"metrics","hz":250,"reports":12345,"dropped":0}
-    {"ev":"kill","reason":"combo|unplug|signal|error"}
-    {"ev":"screen","off":true,"method":"gamescope|kscreen|backlight|none"}   # extension: Status.screen_off
-
-Human-readable logging goes to *stderr* (and optionally a file via ``--log-file``).
-"""
+stdout is reserved for the events the Decky backend consumes, one JSON object per line
+(``state``, ``error``, ``metrics``, ``kill``, ``screen`` — a contract); humans read stderr / ``--log-file``."""
 from __future__ import annotations
 
 import json
@@ -66,11 +57,8 @@ class JsonEventSink:
                 self._stream.write(line + "\n")
                 self._stream.flush()
             except (OSError, ValueError):
-                # Broken pipe / closed stdout: the supervisor went away; keep running the
-                # teardown path, nobody is listening anymore.
-                pass
+                pass  # stdout closed: the supervisor is gone, keep running the teardown path
 
-    # Convenience wrappers matching the event list in docs/ARCHITECTURE.md.
     def state(self, state: str, detail: str = "") -> None:
         self.emit("state", state=state, detail=detail)
 
@@ -84,7 +72,6 @@ class JsonEventSink:
         self.emit("kill", reason=reason)
 
     def screen(self, off: bool, method: str = "none") -> None:
-        # method: gamescope | kscreen | backlight | none — which strategy turned the screen off
         self.emit("screen", off=bool(off), method=str(method or "none"))
 
 

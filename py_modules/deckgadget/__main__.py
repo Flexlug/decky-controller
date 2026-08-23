@@ -1,11 +1,10 @@
-"""CLI entry point: ``python3 -m deckgadget run|status|recover|probe|demo`` (docs/ARCHITECTURE.md).
+"""python3 -m deckgadget run|demo|status|recover|probe
 
-* ``run``     — capture the Deck controller and expose it to the PC; JSON-lines events on stdout
-* ``demo``    — like ``run`` but with a synthetic source (no controller capture)
-* ``status``  — JSON snapshot: DRD / UDC / extcon / cable (power, PD contract, kind) / Neptune / captured /
-                gadgets / screen (+ screen_methods)
-* ``recover`` — idempotent full rollback (incl. waking the display), always exits 0
-* ``probe``   — capture the controller for N seconds and print decoded reports (bit calibration)
+run      capture the Deck controller and expose it to the PC (JSON-lines events on stdout)
+demo     same with a synthetic source (no capture)
+status   JSON snapshot: DRD / UDC / cable / Neptune / gadgets / screen
+recover  idempotent full rollback, always exits 0
+probe    capture the controller and print decoded reports
 """
 from __future__ import annotations
 
@@ -75,11 +74,6 @@ def config_from_args(args: argparse.Namespace, demo: bool = False) -> C.RunConfi
     )
 
 
-# --------------------------------------------------------------------------------------
-# status
-# --------------------------------------------------------------------------------------
-
-
 def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = True) -> Dict[str, Any]:
     from .platform import guard, neptune, screen, usb_role
 
@@ -119,7 +113,7 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
         gamescope = screen.GamescopeSleep()
         kscreen = screen.KscreenDpms()
         backlight_available = bool(out.get("backlight", {}).get("available")) if isinstance(out.get("backlight"), dict) else False
-        # Which screen-off strategies would work right now (auto order: gamescope -> kscreen -> backlight).
+        # what would work right now; auto tries gamescope -> kscreen -> backlight
         out["screen_methods"] = {"gamescope": gamescope.available(), "kscreen": kscreen.available(),
                                  "backlight": backlight_available}
         out["gamescope_socket"] = gamescope.socket_path
@@ -134,10 +128,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-# --------------------------------------------------------------------------------------
-# recover
-# --------------------------------------------------------------------------------------
-
 def cmd_recover(args: argparse.Namespace) -> int:
     from .platform import guard
 
@@ -149,10 +139,6 @@ def cmd_recover(args: argparse.Namespace) -> int:
     print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     return 0
 
-
-# --------------------------------------------------------------------------------------
-# run / demo
-# --------------------------------------------------------------------------------------
 
 def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
     from .session import build_session
@@ -179,10 +165,6 @@ def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
     signal.signal(signal.SIGHUP, on_signal)
     return session.run()
 
-
-# --------------------------------------------------------------------------------------
-# probe
-# --------------------------------------------------------------------------------------
 
 def cmd_probe(args: argparse.Namespace) -> int:
     from .sources.neptune_usb import NeptuneUsbSource, decode_report, parse_report

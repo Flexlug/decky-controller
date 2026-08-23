@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Build out/decky-controller.zip for "Install from zip" in Decky Loader (Developer menu).
-#
-# Zip layout (what Decky Loader expects - see docs/DEV.md "Packaging"):
-#   decky-controller/
-#     dist/index.js  main.py  plugin.json  package.json  py_modules/  LICENSE  README.md  THIRD_PARTY_NOTICES.md
-#
-# Deliberately NOT shipped: dist/index.js.map (1.4 MB source map), node_modules/, tests/, docs/,
-# notes/ (local drafts and spikes), __pycache__/ and any other working files - only the files listed above are copied.
-#
-# Usage: scripts/build-zip.sh [--no-build]   (run from anywhere)
-#   --no-build  skip the frontend build and package the existing dist/index.js (CI builds it in a previous step)
+# Package out/decky-controller.zip for Decky Loader's "Install from zip".
+# Ships: dist/index.js main.py plugin.json package.json py_modules/ LICENSE README*.md THIRD_PARTY_NOTICES.md
+# Never ships: the source map, node_modules/, tests/, docs/, notes/, __pycache__/.
+# Usage: scripts/build-zip.sh [--no-build]   (--no-build packages the existing dist/index.js, as CI does)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,8 +18,6 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 cd "$ROOT"
 
-# --- frontend -----------------------------------------------------------------
-# pnpm is the package manager (package.json "packageManager"); fall back to corepack when pnpm is not on PATH.
 pnpm_cmd() {
   if command -v pnpm >/dev/null 2>&1; then pnpm "$@"
   elif command -v corepack >/dev/null 2>&1; then corepack pnpm "$@"
@@ -43,15 +34,12 @@ if [ "$BUILD" = 1 ]; then
 fi
 [ -f dist/index.js ] || die "dist/index.js missing - run 'pnpm run build' first"
 
-# --- stage --------------------------------------------------------------------
 rm -rf "$STAGE" "$ZIP"
 mkdir -p "$STAGE/dist"
-# Only the bundle ships (the source map stays local).
 cp dist/index.js "$STAGE/dist/"
 cp plugin.json package.json LICENSE "$STAGE/"
 [ -f THIRD_PARTY_NOTICES.md ] && cp THIRD_PARTY_NOTICES.md "$STAGE/"
 
-# Parts produced by other parts of the project; tolerate their absence (warn, not fail).
 if [ -f main.py ]; then
   cp main.py "$STAGE/"
 else
@@ -59,7 +47,6 @@ else
 fi
 if [ -d py_modules ]; then
   mkdir -p "$STAGE/py_modules"
-  # Recursive copy excluding bytecode caches (tar is always available on SteamOS/dev hosts).
   tar -C py_modules --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' -cf - . \
     | tar -xf - -C "$STAGE/py_modules"
 else
@@ -70,12 +57,11 @@ if [ -f README.md ]; then
 else
   warn "README.md not found"
 fi
+[ -f README.ru.md ] && cp README.ru.md "$STAGE/"
 
-# --- zip ----------------------------------------------------------------------
 if command -v zip >/dev/null 2>&1; then
   (cd "$OUT_DIR" && zip -qr "$NAME.zip" "$NAME")
 else
-  # Fallback without the zip binary (stdlib only).
   python3 - "$OUT_DIR" "$NAME" <<'PY'
 import os, sys, zipfile
 out_dir, name = sys.argv[1], sys.argv[2]
@@ -88,7 +74,7 @@ with zipfile.ZipFile(os.path.join(out_dir, name + ".zip"), "w", zipfile.ZIP_DEFL
 PY
 fi
 
-# --- sanity: nothing that must stay local slipped in ---------------------------
+# nothing that must stay local slipped in
 python3 - "$ZIP" <<'PY'
 import sys, zipfile
 names = zipfile.ZipFile(sys.argv[1]).namelist()

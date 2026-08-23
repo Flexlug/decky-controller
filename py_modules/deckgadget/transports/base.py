@@ -1,10 +1,9 @@
 """Transport protocol, metrics and the latest-report slot shared by both transports.
 
-Design note: ``send()`` never blocks the caller (the session hot loop).  It drops the
-report into a :class:`ReportSlot`; a dedicated writer thread pushes the *newest* report
-to the endpoint.  If the host polls slower than the source produces, older unsent
-reports are replaced (counted as ``dropped``) — input latency stays minimal and a stalled
-endpoint can never block kill-combo detection.
+``send()`` never blocks the session hot loop: it drops the report into a :class:`ReportSlot` and a writer
+thread pushes the *newest* one to the endpoint.  When the host polls slower than the source produces, older
+unsent reports are replaced (counted as ``dropped``) — latency stays minimal and a stalled endpoint can never
+block kill-combo detection.
 """
 from __future__ import annotations
 
@@ -71,9 +70,7 @@ _cancel_installed = False
 
 
 def install_cancel_signal_handler() -> bool:
-    """Make :data:`CANCEL_SIGNAL` a harmless, syscall-interrupting signal (main thread only).
-
-    Returns True when the handler is installed (now or earlier)."""
+    """Make :data:`CANCEL_SIGNAL` a harmless, syscall-interrupting signal (main thread only); True once installed."""
     global _cancel_installed
     if _cancel_installed:
         return True

@@ -1,9 +1,4 @@
-/**
- * Modal dialogs: ACTIVE-session overlay, BIOS/DRD instructions and raw diagnostics.
- *
- * All modals are opened with `showModal(<X />)`; Steam injects a `closeModal` prop
- * into the root element, which we forward to `ModalRoot`.
- */
+// Modals are opened with showModal(<X />); Steam injects the `closeModal` prop, forwarded to ModalRoot.
 import {
   DialogBody,
   DialogBodyText,
@@ -23,17 +18,13 @@ import {
 } from "./types";
 
 interface ModalProps {
-  /** Injected by showModal(); closes this modal. */
   closeModal?: () => void;
 }
 
 const holdSeconds = (ms: number): string => (ms / 1000).toFixed(1).replace(/\.0$/, "");
 
-/**
- * Shown while session_state === "ACTIVE". The built-in controller is captured by the
- * daemon, so this dialog is touch-only: the screen wakes for a few seconds on touch
- * and the big Stop button is the on-screen way out besides the kill combo.
- */
+/** Shown while ACTIVE. The controller is captured, so this is touch-only: the big Stop button is the
+ *  on-screen way out besides the kill combo. */
 export const ActiveModal: FC<ModalProps> = ({ closeModal }) => {
   const { status, settings, busy } = useStore();
   const profile = status?.active_profile ?? settings.profile;
@@ -79,7 +70,6 @@ export const ActiveModal: FC<ModalProps> = ({ closeModal }) => {
 
 const STEP_LIST: CSSProperties = { margin: "8px 0 0 18px", lineHeight: 1.6 };
 
-/** BIOS instructions for enabling USB Dual-Role Device (DRD). */
 export const DrdHelpModal: FC<ModalProps> = ({ closeModal }) => (
   <ModalRoot closeModal={closeModal} onCancel={closeModal}>
     <DialogHeader>How to enable DRD (USB Dual-Role Device)</DialogHeader>
@@ -137,7 +127,6 @@ const PRE_STYLE: CSSProperties = {
   userSelect: "text",
 };
 
-/** Raw output of `get_diagnostics` (shape is backend-defined, printed as JSON). */
 export const DiagnosticsModal: FC<ModalProps & { data: Diagnostics }> = ({
   closeModal,
   data,

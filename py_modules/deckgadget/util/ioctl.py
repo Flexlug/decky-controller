@@ -1,14 +1,7 @@
-"""ctypes-based ioctl(2) wrapper and the ``_IOC`` request-number macros.
+"""``ioctl(2)`` through ctypes, plus the ``_IOC`` request-number macros (asm-generic/ioctl.h, x86_64).
 
-Why not :func:`fcntl.ioctl`?  It holds the GIL for the whole call, so a blocking
-``USB_RAW_IOCTL_EVENT_FETCH`` / ``USBDEVFS_BULK`` would stall every other Python
-thread (see docs/HARDWARE.md, "Kernel gadget stack").  Calling ``ioctl`` through ``ctypes``
-releases the GIL, so the IN-writer, OUT-reader, heartbeat and source-reader
-threads really run concurrently.
-
-Request numbers follow ``include/uapi/asm-generic/ioctl.h`` for x86_64
-(``_IOC_NRBITS=8, _IOC_TYPEBITS=8, _IOC_SIZEBITS=14, _IOC_DIRBITS=2``).
-"""
+``fcntl.ioctl`` holds the GIL for the whole call, so a blocking ``USB_RAW_IOCTL_EVENT_FETCH`` /
+``USBDEVFS_BULK`` would stall every other thread; libc via ctypes releases it."""
 from __future__ import annotations
 
 import ctypes
@@ -53,9 +46,6 @@ def IOWR(type_: Union[str, int], nr: int, size: int) -> int:  # noqa: N802
     return _ioc(IOC_READ | IOC_WRITE, type_, nr, size)
 
 
-# Keep the legacy lowercase alias used by the spike.
-_IOC = _ioc
-
 _libc: Optional[ctypes.CDLL] = None
 
 
@@ -70,23 +60,16 @@ def _get_libc() -> ctypes.CDLL:
 
 
 def ioctl(fd: int, request: int, arg: Optional[object] = None) -> int:
-    """Call ``ioctl(fd, request, arg)`` via libc, releasing the GIL while blocked.
-
-    ``arg`` may be ``None`` (passed as NULL), a ctypes object (``create_string_buffer``,
-    a ``Structure`` instance, ``c_uint`` ...) or anything ``ctypes.byref`` accepts.
-    Raises :class:`OSError` with the real errno on failure (including ``EINTR`` when a
-    blocking call was interrupted by a signal — callers decide whether to retry).
-    Returns the non-negative ioctl result.
-    """
+    """``arg``: ``None`` (NULL), a ctypes object (passed by address) or an int (passed by value).
+    Raises ``OSError`` with the real errno — ``EINTR`` included, callers decide whether to retry."""
     if arg is None:
         arg_pointer: object = ctypes.c_void_p(0)
     elif isinstance(arg, (ctypes.Array, ctypes.Structure, ctypes.Union, ctypes._SimpleCData)):
-        arg_pointer = ctypes.c_void_p(ctypes.addressof(arg))   # pointer to the caller-owned buffer
+        arg_pointer = ctypes.c_void_p(ctypes.addressof(arg))
     elif isinstance(arg, int):
         arg_pointer = ctypes.c_void_p(arg)
     else:
         arg_pointer = arg
-    # ctypes performs its own errno save/restore when use_errno=True.
     ctypes.set_errno(0)
     result = _get_libc().ioctl(fd, ctypes.c_ulong(request), arg_pointer)
     if result < 0:

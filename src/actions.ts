@@ -1,7 +1,4 @@
-/**
- * High level operations used by the UI: call the backend, push the result into the
- * store, and surface `{ok:false,error}` envelopes (or thrown errors) as toasts.
- */
+// UI operations: call the backend, push results into the store, surface errors as toasts.
 import { toaster } from "@decky/api";
 import * as api from "./api";
 import { store } from "./store";
@@ -18,7 +15,6 @@ import {
 const PLUGIN_TITLE = "Decky Controller";
 const TAG = "[decky-controller]";
 
-/** Show a toast; errors/warnings stay a bit longer than the Steam default. */
 export function notify(
   body: string,
   severity: ToastEvent["severity"] = "info",
@@ -36,10 +32,7 @@ function errorText(e: unknown): string {
   return typeof e === "string" ? e : JSON.stringify(e);
 }
 
-/**
- * Store a Status-or-error response. Returns true when a Status was applied.
- * `context` prefixes the error toast (e.g. "Start failed").
- */
+/** Returns true when a Status was applied; `context` prefixes the error toast. */
 function applyStatusResult(result: Status | unknown, context: string): boolean {
   if (isApiError(result)) {
     notify(`${context}: ${result.error}`, "error");
@@ -54,7 +47,7 @@ function applyStatusResult(result: Status | unknown, context: string): boolean {
   return false;
 }
 
-/** `get_status` -> store. Silent on transport errors (used by polling). */
+/** Silent on transport errors — used by polling. */
 export async function refreshStatus(): Promise<void> {
   try {
     const result = await api.getStatus();
@@ -68,7 +61,6 @@ export async function refreshStatus(): Promise<void> {
   }
 }
 
-/** `get_settings` -> store. */
 export async function loadSettings(): Promise<void> {
   try {
     const result = await api.getSettings();
@@ -82,10 +74,7 @@ export async function loadSettings(): Promise<void> {
   }
 }
 
-/**
- * `set_settings(patch)` with an optimistic local update; the backend's merged result
- * wins, and the previous settings are restored if the call fails.
- */
+/** Optimistic local update; the backend's merged result wins, previous settings are restored on failure. */
 export async function updateSettings(patch: SettingsPatch): Promise<void> {
   const previous = store.getSettings();
   store.setSettings({
@@ -107,7 +96,6 @@ export async function updateSettings(patch: SettingsPatch): Promise<void> {
   }
 }
 
-/** `start(profile)` using the currently selected profile. */
 export async function startSession(): Promise<void> {
   if (store.isBusy()) return;
   store.setBusy(true);
@@ -121,7 +109,7 @@ export async function startSession(): Promise<void> {
   }
 }
 
-/** `stop()` - idempotent full rollback; safe to call in any state. */
+/** Idempotent full rollback; safe in any state. */
 export async function stopSession(): Promise<void> {
   if (store.isBusy()) return;
   store.setBusy(true);
@@ -135,7 +123,7 @@ export async function stopSession(): Promise<void> {
   }
 }
 
-/** `get_diagnostics` -> raw dict, or null (an error toast has been shown). */
+/** null when the call failed (an error toast has been shown). */
 export async function loadDiagnostics(): Promise<Diagnostics | null> {
   try {
     const result = await api.getDiagnostics();
@@ -150,7 +138,6 @@ export async function loadDiagnostics(): Promise<Diagnostics | null> {
   }
 }
 
-/** Handler for the backend `status` event. */
 export function onStatusEvent(status: unknown): void {
   if (looksLikeStatus(status)) {
     store.setStatus(status);
@@ -159,7 +146,6 @@ export function onStatusEvent(status: unknown): void {
   }
 }
 
-/** Handler for the backend `toast` event. */
 export function onToastEvent(event: unknown): void {
   const toast = (event ?? {}) as Partial<ToastEvent>;
   const severity: ToastEvent["severity"] =

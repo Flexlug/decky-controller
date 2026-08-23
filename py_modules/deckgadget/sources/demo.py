@@ -1,8 +1,5 @@
-"""Demo input source: sine sticks, blinking A, cycling D-pad — for ``deckgadget demo``.
-
-Lets the transport path (Deck -> cable -> PC) be verified without capturing the real
-controller (the same demo pattern the spikes used: left stick circles, A blinks).
-"""
+"""Synthetic input (sine sticks, blinking A, cycling D-pad): exercises the transport path without
+capturing the real controller."""
 from __future__ import annotations
 
 import math

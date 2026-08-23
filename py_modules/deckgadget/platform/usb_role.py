@@ -1,19 +1,11 @@
-"""USB role / UDC / extcon inspection (read-only; we never switch the port role ourselves).
+"""Read-only USB role / UDC / extcon / cable inspection — the port role is never switched here.
 
-Facts (docs/HARDWARE.md): with DRD enabled in BIOS the PCI function ``04:00.3`` is claimed by
-``dwc3-pci`` (its modalias resolves to ``dwc3_pci``), creating platform device
-``dwc3.1.auto``.  The Valve EC (``steamdeck-extcon``, ``/sys/class/extcon/extcon0``) picks
-the role: ``USB-HOST=1`` -> host (dock), otherwise -> device, in which case
-``/sys/class/udc/dwc3.1.auto`` exists and its ``state`` file tells whether a host
-enumerated us (``not attached`` / ``attached`` / ``powered`` / ``default`` /
-``addressed`` / ``configured``).
-
-``udc_state`` only says something once a gadget is bound; while idle it reads ``not attached``
-even with a PC on the cable.  What the port *physically* sees is read from the EC instead
-(verified on a Deck OLED, idle, plugged into a PC): ``/sys/class/power_supply/ACAD/online`` = 1
-and the ``steamdeck_hwmon`` hwmon reports the USB-PD contract — ``in0_label`` "PD Contract
-Voltage" ``in0_input`` 5000 (mV), ``curr1_label`` "PD Contract Current" ``curr1_input`` 1500
-(mA).  A PC/hub port negotiates 5 V (0.9/1.5/3 A); a PD charger negotiates 15-20 V.
+With DRD enabled in BIOS, PCI ``04:00.3`` is claimed by ``dwc3-pci`` and becomes UDC ``dwc3.1.auto``;
+the Valve EC (``steamdeck-extcon``) picks the role: ``USB-HOST=1`` -> host (dock), else device.
+``/sys/class/udc/<udc>/state`` only says something once a gadget is bound (idle = "not attached"
+even with a PC on the cable), so what the port physically sees comes from the EC instead:
+``power_supply/ACAD/online`` plus the USB-PD contract in ``steamdeck_hwmon`` (PC/hub port = 5 V,
+PD charger = 15-20 V).
 """
 from __future__ import annotations
 
@@ -31,11 +23,11 @@ DWC3_PCI_MODULE = "dwc3_pci"
 DWC3_PCI_DRIVER = "dwc3-pci"
 UDC_STATE_CONFIGURED = "configured"
 
-AC_SUPPLY_NAME = "ACAD"                       # /sys/class/power_supply/ACAD (type "Mains") on the Deck
-STEAMDECK_HWMON_NAME = "steamdeck_hwmon"      # EC hwmon; found by its ``name`` file, never by index
-PD_VOLTAGE_LABEL = "PD Contract Voltage"      # in<N>_label  -> in<N>_input   (mV)
+AC_SUPPLY_NAME = "ACAD"
+STEAMDECK_HWMON_NAME = "steamdeck_hwmon"      # found by its ``name`` file, hwmon indexes are not stable
+PD_VOLTAGE_LABEL = "PD Contract Voltage"      # in<N>_label -> in<N>_input (mV)
 PD_CURRENT_LABEL = "PD Contract Current"      # curr<N>_label -> curr<N>_input (mA)
-PC_PORT_MAX_MV = 5500                         # <= 5.5 V contract = plain USB port (PC/hub); above = PD charger
+PC_PORT_MAX_MV = 5500                         # contract <= 5.5 V = plain USB port, above = PD charger
 CABLE_KINDS = ("none", "pc", "charger", "host_device", "unknown")
 
 
@@ -100,10 +92,7 @@ def extcon_cables(sysfs: str = "/sys") -> Dict[str, int]:
 
 
 def cable_power(sysfs: str = "/sys") -> Optional[bool]:
-    """Is there power on the USB-C port?  ``/sys/class/power_supply/ACAD/online`` (``None`` if unreadable).
-
-    Falls back to any other supply whose ``type`` is ``Mains`` so a renamed EC node still works.
-    """
+    """Power on the USB-C port (``ACAD/online``, falling back to any ``Mains`` supply); ``None`` if unreadable."""
     base = os.path.join(sysfs, "class", "power_supply")
     candidates = [AC_SUPPLY_NAME]
     try:
@@ -120,7 +109,7 @@ def cable_power(sysfs: str = "/sys") -> Optional[bool]:
 
 
 def find_hwmon(name: str, sysfs: str = "/sys") -> Optional[str]:
-    """Directory of the hwmon whose ``name`` file equals ``name`` (hwmon indexes are not stable)."""
+    """Directory of the hwmon whose ``name`` file equals ``name``."""
     base = os.path.join(sysfs, "class", "hwmon")
     try:
         entries = sorted(os.listdir(base))
@@ -134,11 +123,8 @@ def find_hwmon(name: str, sysfs: str = "/sys") -> Optional[str]:
 
 
 def _hwmon_channel(hwmon_dir: str, prefix: str, label: str, default_channel: int) -> Optional[int]:
-    """``<prefix>N_input`` of the channel whose ``<prefix>N_label`` equals ``label``.
-
-    When the driver exposes no labels at all for that prefix, ``default_channel`` is used; when it
-    exposes labels but none matches, ``None`` (never guess a different quantity).
-    """
+    """``<prefix>N_input`` of the channel labelled ``label``; ``default_channel`` only when the driver exposes
+    no labels at all for that prefix (labels present but none matching -> ``None``, never a guess)."""
     try:
         names = os.listdir(hwmon_dir)
     except OSError:
@@ -163,14 +149,9 @@ def pd_contract(sysfs: str = "/sys") -> Tuple[Optional[int], Optional[int]]:
 
 
 def classify_cable(extcon: Dict[str, int], power: Optional[bool], pd_contract_mv: Optional[int]) -> str:
-    """What is on the USB-C port, independent of whether a gadget is bound (one of ``CABLE_KINDS``).
-
-    * ``host_device`` - extcon ``USB-HOST=1``: a dock/peripheral is attached, the port is a host;
-    * ``none``        - no power on the port (``ACAD online = 0``);
-    * ``pc``          - a PD contract of <= 5.5 V: a plain USB port (PC, hub, non-PD charger);
-    * ``charger``     - a PD contract above 5.5 V (15-20 V): a PD charger, no data partner;
-    * ``unknown``     - power state unreadable or no/zero contract reading (e.g. right after plugging in).
-    """
+    """What is on the USB-C port, independent of whether a gadget is bound (one of ``CABLE_KINDS``):
+    dock/peripheral (port is host) > no power > PD contract <= 5.5 V = PC/hub port, above = PD charger;
+    ``unknown`` when power is unreadable or the contract reads 0 (e.g. right after plugging in)."""
     if extcon.get("USB-HOST") == 1:
         return "host_device"
     if power is False:
@@ -190,10 +171,8 @@ def _modalias_resolves_to(modalias: str, module: str, timeout: float = 2.0) -> b
 
 
 def detect_drd(sysfs: str = "/sys", use_modprobe: bool = True) -> Dict[str, object]:
-    """DRD detection: is there a PCI device bound to / matching ``dwc3-pci``?
-
-    Returns ``{"enabled": bool, "pci": "0000:04:00.3"|None, "driver": str|None, "via": "driver|modalias|none"}``.
-    """
+    """Is a PCI device bound to (or matching by modalias) ``dwc3-pci``?
+    Returns ``{"enabled", "pci", "driver", "via": "driver|modalias|none"}``."""
     base = os.path.join(sysfs, "bus", "pci", "devices")
     try:
         devices = sorted(os.listdir(base))
@@ -210,7 +189,7 @@ def detect_drd(sysfs: str = "/sys", use_modprobe: bool = True) -> Dict[str, obje
         if driver == DWC3_PCI_DRIVER:
             return {"enabled": True, "pci": device_name, "driver": driver, "via": "driver"}
         device_class = read_text(os.path.join(path, "class"), "") or ""
-        if device_class.lower().startswith("0x0c03"):  # USB controllers only, keeps status fast
+        if device_class.lower().startswith("0x0c03"):  # USB controllers only
             candidates.append((device_name, driver, read_text(os.path.join(path, "modalias"), "") or ""))
     if use_modprobe:
         for device_name, driver, modalias in candidates:
@@ -243,12 +222,12 @@ class UsbRoleStatus:
     udc_speed: Optional[str] = None
     udc_function: Optional[str] = None
     extcon: Dict[str, int] = field(default_factory=dict)
-    host_connected: bool = False          # a host enumerated our gadget (udc_state == configured)
+    host_connected: bool = False          # udc_state == configured
     raw_gadget: bool = False
-    cable_power: Optional[bool] = None    # power on the USB-C port (ACAD online); None = unreadable
-    pd_contract_mv: Optional[int] = None  # negotiated USB-PD contract, mV (steamdeck_hwmon)
-    pd_contract_ma: Optional[int] = None  # negotiated USB-PD contract, mA
-    cable_kind: str = "unknown"           # one of CABLE_KINDS (classify_cable)
+    cable_power: Optional[bool] = None    # None = unreadable
+    pd_contract_mv: Optional[int] = None
+    pd_contract_ma: Optional[int] = None
+    cable_kind: str = "unknown"           # one of CABLE_KINDS
 
     def as_dict(self) -> dict:
         return {
@@ -283,7 +262,7 @@ def usb_role_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool =
 
 
 class UdcWatcher:
-    """Cheap poller for ``/sys/class/udc/<udc>/state`` used by the session loop."""
+    """Cheap poller for ``/sys/class/udc/<udc>/state``."""
 
     def __init__(self, udc: Optional[str] = None, sysfs: str = "/sys") -> None:
         self.sysfs = sysfs

@@ -1,16 +1,10 @@
-"""Canonical controller state shared by sources, profiles and the session.
-
-``ControllerState`` is *source-agnostic*: the Neptune parser fills it from the 64-byte
-USB report, the demo source synthesises it, and profiles pack it into whatever the PC
-expects.  Button bits below are **our own** canonical numbering (not the Deck wire
-format — that lives in ``sources/neptune_usb.py``).
-"""
+"""Canonical, source-agnostic controller state. Button bits are this package's own numbering, not the
+Deck wire format (that lives in ``sources/neptune_usb.py``)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
-# --- canonical button bits ---------------------------------------------------------
 BTN_A = 1 << 0
 BTN_B = 1 << 1
 BTN_X = 1 << 2
@@ -19,12 +13,12 @@ BTN_L1 = 1 << 4          # left bumper (LB)
 BTN_R1 = 1 << 5          # right bumper (RB)
 BTN_L2 = 1 << 6          # left trigger full press (digital)
 BTN_R2 = 1 << 7          # right trigger full press (digital)
-BTN_L3 = 1 << 8          # left stick click
-BTN_R3 = 1 << 9          # right stick click
+BTN_L3 = 1 << 8
+BTN_R3 = 1 << 9
 BTN_VIEW = 1 << 10       # "Back" on Xbox
 BTN_MENU = 1 << 11       # "Start" on Xbox
 BTN_STEAM = 1 << 12      # "Guide" on Xbox
-BTN_QAM = 1 << 13        # "..." quick access button
+BTN_QAM = 1 << 13        # "..." quick-access button
 BTN_L4 = 1 << 14         # back paddles
 BTN_L5 = 1 << 15
 BTN_R4 = 1 << 16
@@ -42,7 +36,7 @@ BTN_RSTICK_TOUCH = 1 << 27
 
 DPAD_MASK = BTN_DPAD_UP | BTN_DPAD_DOWN | BTN_DPAD_LEFT | BTN_DPAD_RIGHT
 
-#: bit -> human name (stable names used by settings: kill_combo / paddles / probe output)
+#: stable names: used by settings (kill_combo / paddles) and probe output
 BUTTON_NAMES: Dict[int, str] = {
     BTN_A: "A", BTN_B: "B", BTN_X: "X", BTN_Y: "Y",
     BTN_L1: "L1", BTN_R1: "R1", BTN_L2: "L2", BTN_R2: "R2",
@@ -91,15 +85,8 @@ def clamp_trigger(value: int) -> int:
 
 @dataclass(slots=True)
 class ControllerState:
-    """Snapshot of the controller.
-
-    * ``buttons`` — canonical ``BTN_*`` bitmask (D-pad included)
-    * ``lx, ly, rx, ry`` — sticks, signed 16-bit, **+Y = up** (the Deck's native and XInput's convention)
-    * ``lt, rt`` — triggers 0..``TRIGGER_MAX``
-    * ``lpad``/``rpad`` — ``(x, y, pressure)`` or ``None`` (not used by the MVP profiles)
-    * ``gyro``/``accel`` — raw 3-tuples or ``None`` (reserved)
-    * ``packet`` — source packet counter, ``ts`` — monotonic timestamp
-    """
+    """Sticks are signed 16-bit with **+Y = up** (Deck native and XInput convention); triggers 0..TRIGGER_MAX;
+    pads are ``(x, y, pressure)`` or ``None``; ``ts`` is a monotonic timestamp."""
 
     buttons: int = 0
     lx: int = 0

@@ -1,10 +1,6 @@
-"""configfs + f_hid transport (port of the original configfs spike) — the plain-HID fallback.
-
-Creates ``/sys/kernel/config/usb_gadget/deckctl_hid`` with one ``hid.usb0`` function,
-binds it to the UDC and writes reports to ``/dev/hidgN`` (O_NONBLOCK + select so the
-writer never blocks forever; f_hid returns ``ESHUTDOWN`` until the host configures us).
-Output reports from the host are read from the same node and passed to
-``profile.on_output``.  Teardown reuses :func:`deckgadget.platform.guard.remove_configfs_gadget`.
+"""configfs + f_hid transport (plain-HID fallback): builds ``usb_gadget/deckctl_hid`` with one ``hid.usb0``
+function, binds it to the UDC and moves reports through ``/dev/hidgN`` (O_NONBLOCK + select; f_hid returns
+ESHUTDOWN until the host configures us).  Teardown reuses :func:`deckgadget.platform.guard.remove_configfs_gadget`.
 """
 from __future__ import annotations
 
@@ -56,7 +52,6 @@ class UsbHidTransport:
         self._error: Optional[BaseException] = None
         self._udc_watch: Optional[usb_role.UdcWatcher] = None
 
-    # --- Transport protocol -----------------------------------------------------------
     @property
     def error(self) -> Optional[BaseException]:
         return self._error
@@ -92,7 +87,7 @@ class UsbHidTransport:
         try:
             self.node = self._find_hidg_node()
         except TransportError:
-            # _build_gadget() already wrote UDC (the gadget is live on the cable): never leak it.
+            # UDC is already written (the gadget is live on the cable): never leak it
             guard.remove_configfs_gadget(self.gadget_dir)
             raise
         try:
@@ -127,7 +122,6 @@ class UsbHidTransport:
             guard.remove_configfs_gadget(self.gadget_dir)
             log.info("f_hid gadget removed (sent=%d dropped=%d)", self._metrics.sent, self._slot.dropped)
 
-    # --- setup helpers ---------------------------------------------------------------
     def _ensure_configfs(self) -> None:
         if self.modprobe:
             subprocess.run(["modprobe", "libcomposite"], check=False, capture_output=True)
@@ -188,7 +182,6 @@ class UsbHidTransport:
             time.sleep(0.05)
         raise TransportError("no /dev/hidg* node appeared after binding the gadget")
 
-    # --- threads ----------------------------------------------------------------------
     def _write_loop(self) -> None:
         fd = self._fd
         pending: Optional[bytes] = None

@@ -1,11 +1,5 @@
-/**
- * Tiny module-level store for the latest backend Status / Settings.
- *
- * The QAM panel (Content) unmounts whenever the Quick Access Menu closes, but the
- * plugin itself (definePlugin) lives for the whole session and keeps receiving
- * `status` events. Keeping the state outside React lets the panel, the ACTIVE modal
- * and the event listeners all share one source of truth.
- */
+// Module-level store: the QAM panel unmounts whenever the menu closes, but the plugin keeps receiving
+// `status` events for the whole session, so the panel, the ACTIVE modal and the listeners share this state.
 import { useEffect, useState } from "react";
 import { DEFAULT_SETTINGS, type Settings, type Status } from "./types";
 
@@ -15,7 +9,7 @@ interface StoreState {
   status: Status | null;
   settings: Settings;
   settingsLoaded: boolean;
-  /** A start/stop request is in flight - disables the toggle/buttons meanwhile. */
+  /** start/stop request in flight — disables the toggle/buttons. */
   busy: boolean;
 }
 
@@ -66,7 +60,6 @@ export const store = {
   },
 };
 
-/** React hook: re-renders the caller whenever the store changes. */
 export function useStore(): StoreState {
   const [, bump] = useState(0);
   useEffect(() => store.subscribe(() => bump((count) => count + 1)), []);

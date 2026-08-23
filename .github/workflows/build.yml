@@ -1,14 +1,5 @@
-# CI / release pipeline for Decky Controller
-#
-# Flow:
-#   build   — runs on every push to main, on every pull request and on tags v*:
-#             pnpm install (frozen lockfile) -> tsc typecheck -> rollup build -> Python compileall + unittest
-#             -> scripts/build-zip.sh --no-build -> upload out/decky-controller.zip as a workflow artifact.
-#   release — only for tags v* (needs build): checks that the tag equals "v" + package.json version
-#             (fails otherwise, so a mistagged release never ships), downloads the zip produced by the build
-#             job and creates/updates the GitHub Release with exactly one asset (decky-controller.zip) and
-#             auto-generated release notes.
-#
+# build: typecheck + rollup + Python tests + zip on every push/PR; release: on tags v* (must equal
+# "v" + package.json version) publishes out/decky-controller.zip as the single GitHub Release asset.
 # To cut a release: bump "version" in package.json, commit, `git tag v<version>`, push the tag.
 name: build
 
@@ -32,8 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm 9.x — the exact version comes from package.json "packageManager" (pnpm@9.15.9).
-      # Do not add a `version:` input here: pnpm/action-setup@v4 fails when both are set and differ.
+      # version comes from package.json "packageManager"; a `version:` input here would make action-setup fail
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4

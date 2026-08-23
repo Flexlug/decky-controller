@@ -1,13 +1,6 @@
-"""Profile protocol + descriptor containers shared by the transports.
-
-A *profile* decides how the Deck presents itself on the USB bus and how a
-:class:`~deckgadget.state.ControllerState` is serialised into the report the
-host expects.  It must be usable by both transports:
-
-* raw-gadget (``transports/usb_raw_gadget.py``) needs full USB descriptors and a hook
-  for class/vendor control requests on EP0 (:meth:`Profile.handle_control`);
-* configfs f_hid (``transports/usb_hid.py``) only needs a HID report descriptor
-  (:meth:`Profile.hid_function`) — profiles that are not plain HID return ``None``.
+"""Profile protocol + descriptor containers.  A profile decides how the Deck presents itself on the bus
+and how a :class:`~deckgadget.state.ControllerState` becomes the host's report; raw-gadget needs the full
+descriptors + an EP0 hook (:meth:`Profile.handle_control`), f_hid only a report descriptor (:meth:`Profile.hid_function`).
 """
 from __future__ import annotations
 
@@ -16,8 +9,6 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Protocol, runtime_checkable
 
 from ..state import ControllerState
-
-# USB setup-packet helpers ------------------------------------------------------------
 
 USB_DIR_IN = 0x80
 USB_TYPE_MASK = 0x60
@@ -113,17 +104,16 @@ class GadgetDescriptors:
     manufacturer: str = "Decky Controller"
     product: str = "Steam Deck Gamepad"
     serial: str = "DECK0001"
-    #: extra string descriptors (index -> text) beyond the three standard ones (1..3)
+    #: index -> text beyond the standard strings 1..3
     extra_strings: Dict[int, str] = field(default_factory=dict)
-    #: interface/class/endpoint descriptors that follow the 9-byte configuration header
+    #: everything after the 9-byte configuration header
     config_body: bytes = b""
     num_interfaces: int = 1
     config_attributes: int = 0xA0            # bus powered + remote wakeup
     max_power_ma: int = 500
-    #: 7-byte endpoint descriptors used for reports (IN mandatory, OUT optional)
+    #: 7-byte report endpoint descriptors (OUT optional)
     ep_in: bytes = b""
     ep_out: Optional[bytes] = None
-    #: answer device_qualifier / other_speed_configuration (high-speed capable device)
     high_speed: bool = True
 
     def device_descriptor(self) -> bytes:
@@ -185,7 +175,7 @@ class Feedback:
     raw: bytes = b""
 
 
-#: callback the transport uses to hand the OUT data stage to the profile: ``read_data() -> bytes``
+#: hands the OUT data stage to the profile
 ReadData = Callable[[], bytes]
 
 
@@ -207,8 +197,5 @@ class Profile(Protocol):
         """configfs f_hid parameters, or ``None`` if this profile is not a plain HID device."""
 
     def handle_control(self, setup: SetupPacket, read_data: ReadData) -> Optional[bytes]:
-        """Handle a non-default EP0 request (class/vendor, or interface-recipient GET_DESCRIPTOR).
-
-        Return ``bytes`` to reply (IN) / acknowledge (OUT — return ``b""`` after consuming
-        ``read_data()`` when ``wLength > 0``), or ``None`` to STALL.
-        """
+        """Class/vendor or interface-recipient EP0 request: return the IN reply, ``b""`` to ACK an OUT
+        (after consuming ``read_data()`` when ``wLength > 0``), or ``None`` to STALL."""

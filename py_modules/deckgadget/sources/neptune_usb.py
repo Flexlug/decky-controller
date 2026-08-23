@@ -1,24 +1,13 @@
-"""Exclusive capture of the Steam Deck controller (Neptune, 28de:1205) through usbfs.
+"""Exclusive capture of the Steam Deck controller (Neptune, 28de:1205) through usbfs: unbind
+interfaces 1.0/1.1/1.2 from usbhid, claim interface 2, read the 64-byte interrupt IN reports with
+``USBDEVFS_BULK`` (``usb_bulk_msg`` handles interrupt endpoints too). Feature reports (lizard-mode off,
+1 s heartbeat, rumble) go out as ``USBDEVFS_CONTROL`` SET_REPORT 0x21/0x09, wValue 0x0300 (feature, id 0),
+wIndex = interface 2 — what usbhid itself does for a report-id-0 feature report.
 
-Pipeline: find device in sysfs -> unbind interfaces 1.0/1.1/1.2 from ``usbhid`` -> open
-``/dev/bus/usb/BBB/DDD`` -> ``USBDEVFS_CLAIMINTERFACE(2)`` -> read 64-byte interrupt IN
-reports with ``USBDEVFS_BULK`` (``usb_bulk_msg`` transparently handles interrupt
-endpoints) -> parse -> :class:`~deckgadget.state.ControllerState`.  Feature reports
-(lizard-mode off, 1 s heartbeat, rumble) go through ``USBDEVFS_CONTROL``::
-
-    bmRequestType 0x21 (host->device, class, interface), bRequest 0x09 SET_REPORT,
-    wValue 0x0300 (feature report, id 0), wIndex = interface 2, 64-byte payload
-
-(that is exactly what hidraw/usbhid does for a report-id-0 feature report).
-
-Wire format and commands come from SDL (zlib licence):
-``src/joystick/hidapi/SDL_hidapi_steamdeck.c``, ``steam/controller_structs.h``,
-``steam/controller_constants.h`` — constants below carry a ``# SDL:`` note.  Bit
-positions are table-driven so they can be corrected after ``deckgadget probe`` on the
-device; offsets were cross-checked against facts from Linux ``hid-steam.c`` (facts only).
-
-ioctl numbers / struct layouts: ``include/uapi/linux/usbdevice_fs.h`` (x86_64 ABI).
-"""
+Wire format and commands: SDL (zlib) ``SDL_hidapi_steamdeck.c``, ``steam/controller_structs.h``,
+``steam/controller_constants.h`` (``# SDL:`` notes below); offsets cross-checked against facts from
+Linux ``hid-steam.c`` (facts only, no code). ioctl numbers / struct layouts: ``include/uapi/linux/usbdevice_fs.h``
+(x86_64)."""
 from __future__ import annotations
 
 import ctypes
@@ -37,10 +26,7 @@ from ..util.log import get_logger
 
 log = get_logger("neptune_usb")
 
-# ---------------------------------------------------------------------------------------
-# usbfs ABI (include/uapi/linux/usbdevice_fs.h)
-# ---------------------------------------------------------------------------------------
-
+# usbfs ABI: include/uapi/linux/usbdevice_fs.h
 
 class UsbfsCtrlTransfer(ctypes.Structure):
     """``struct usbdevfs_ctrltransfer`` (24 bytes on x86_64)."""
@@ -79,19 +65,19 @@ class UsbfsDisconnectClaim(ctypes.Structure):
     _fields_ = [("interface", ctypes.c_uint), ("flags", ctypes.c_uint), ("driver", ctypes.c_char * 256)]
 
 
-USBDEVFS_CONTROL = IOWR("U", 0, ctypes.sizeof(UsbfsCtrlTransfer))          # 0xC0185500
-USBDEVFS_BULK = IOWR("U", 2, ctypes.sizeof(UsbfsBulkTransfer))             # 0xC0185502
-USBDEVFS_RESETEP = IOR("U", 3, ctypes.sizeof(ctypes.c_uint))               # 0x80045503
-USBDEVFS_SETINTERFACE = IOR("U", 4, 8)                                     # 0x80085504
-USBDEVFS_GETDRIVER = IOW("U", 8, ctypes.sizeof(UsbfsGetDriver))            # 0x41045508
-USBDEVFS_CLAIMINTERFACE = IOR("U", 15, ctypes.sizeof(ctypes.c_uint))       # 0x8004550F
-USBDEVFS_RELEASEINTERFACE = IOR("U", 16, ctypes.sizeof(ctypes.c_uint))     # 0x80045510
-USBDEVFS_IOCTL = IOWR("U", 18, 16)                                         # 0xC0105512 (struct usbdevfs_ioctl)
-USBDEVFS_RESET = IO("U", 20)                                               # 0x5514
-USBDEVFS_CLEAR_HALT = IOR("U", 21, ctypes.sizeof(ctypes.c_uint))           # 0x80045515
-USBDEVFS_DISCONNECT = IO("U", 22)                                          # 0x5516 (via USBDEVFS_IOCTL)
-USBDEVFS_CONNECT = IO("U", 23)                                             # 0x5517 (via USBDEVFS_IOCTL)
-USBDEVFS_DISCONNECT_CLAIM = IOR("U", 27, ctypes.sizeof(UsbfsDisconnectClaim))  # 0x8108551B
+USBDEVFS_CONTROL = IOWR("U", 0, ctypes.sizeof(UsbfsCtrlTransfer))
+USBDEVFS_BULK = IOWR("U", 2, ctypes.sizeof(UsbfsBulkTransfer))
+USBDEVFS_RESETEP = IOR("U", 3, ctypes.sizeof(ctypes.c_uint))
+USBDEVFS_SETINTERFACE = IOR("U", 4, 8)
+USBDEVFS_GETDRIVER = IOW("U", 8, ctypes.sizeof(UsbfsGetDriver))
+USBDEVFS_CLAIMINTERFACE = IOR("U", 15, ctypes.sizeof(ctypes.c_uint))
+USBDEVFS_RELEASEINTERFACE = IOR("U", 16, ctypes.sizeof(ctypes.c_uint))
+USBDEVFS_IOCTL = IOWR("U", 18, 16)                                         # struct usbdevfs_ioctl
+USBDEVFS_RESET = IO("U", 20)
+USBDEVFS_CLEAR_HALT = IOR("U", 21, ctypes.sizeof(ctypes.c_uint))
+USBDEVFS_DISCONNECT = IO("U", 22)                                          # sub-command of USBDEVFS_IOCTL
+USBDEVFS_CONNECT = IO("U", 23)                                             # sub-command of USBDEVFS_IOCTL
+USBDEVFS_DISCONNECT_CLAIM = IOR("U", 27, ctypes.sizeof(UsbfsDisconnectClaim))
 USBDEVFS_DISCONNECT_CLAIM_IF_DRIVER = 0x01
 USBDEVFS_DISCONNECT_CLAIM_EXCEPT_DRIVER = 0x02
 
@@ -102,12 +88,9 @@ HID_REPORT_TYPE_FEATURE = 0x03
 USB_REQTYPE_SET_CLASS_INTERFACE = 0x21
 USB_REQTYPE_GET_CLASS_INTERFACE = 0xA1
 FEATURE_REPORT_ID = 0
-FEATURE_WVALUE = (HID_REPORT_TYPE_FEATURE << 8) | FEATURE_REPORT_ID   # 0x0300
+FEATURE_WVALUE = (HID_REPORT_TYPE_FEATURE << 8) | FEATURE_REPORT_ID
 
-# ---------------------------------------------------------------------------------------
-# Valve protocol constants  (SDL: steam/controller_constants.h, steam/controller_structs.h)
-# ---------------------------------------------------------------------------------------
-
+# Valve protocol constants (SDL: steam/controller_constants.h, steam/controller_structs.h)
 HID_FEATURE_REPORT_BYTES = 64                 # SDL: controller_structs.h HID_FEATURE_REPORT_BYTES
 REPORT_LEN = 64
 VALVE_IN_REPORT_MSG_VERSION = 0x01            # SDL: controller_structs.h k_ValveInReportMsgVersion
@@ -138,7 +121,7 @@ SETTING_STEAM_WATCHDOG_ENABLE = 71
 TRACKPAD_NONE = 7                             # SDL: controller_constants.h TrackpadDPadMode
 HAPTIC_INTENSITY_SYSTEM = 0                   # SDL: controller_structs.h haptic_intensity_t
 
-# Deck button bits (SDL: SDL_hidapi_steamdeck.c enum SteamDeckButtons) -----------------------
+# Deck button bits (SDL: SDL_hidapi_steamdeck.c enum SteamDeckButtons)
 STEAMDECK_LBUTTON_R2 = 0x00000001
 STEAMDECK_LBUTTON_L2 = 0x00000002
 STEAMDECK_LBUTTON_R = 0x00000004
@@ -168,7 +151,7 @@ STEAMDECK_HBUTTON_LSTICK_TOUCH = 0x00004000
 STEAMDECK_HBUTTON_RSTICK_TOUCH = 0x00008000
 STEAMDECK_HBUTTON_QAM = 0x00040000
 
-#: table-driven mapping of ulButtonsL bits -> canonical bits (name for probe output)
+#: (wire bit, canonical bit, name for probe output)
 BUTTONS_L: Tuple[Tuple[int, int, str], ...] = (
     (STEAMDECK_LBUTTON_R2, S.BTN_R2, "R2"),
     (STEAMDECK_LBUTTON_L2, S.BTN_L2, "L2"),
@@ -221,15 +204,9 @@ OFF_TRIGGER_L, OFF_TRIGGER_R = 44, 46
 OFF_LSTICK_X, OFF_LSTICK_Y, OFF_RSTICK_X, OFF_RSTICK_Y = 48, 50, 52, 54
 
 
-# ---------------------------------------------------------------------------------------
-# Feature report builders (pure functions; unit-tested)
-# ---------------------------------------------------------------------------------------
-
 def build_feature_report(msg_type: int, payload: bytes = b"", length: Optional[int] = None) -> bytes:
-    """``FeatureReportMsg``: u8 type, u8 length, payload; zero-padded to 64 bytes (no report id).
-
-    ``length`` defaults to ``len(payload)``; a few commands are sent with an explicit value
-    (see :func:`cmd_rumble`, which mirrors SDL's 0)."""
+    """``FeatureReportMsg``: u8 type, u8 length (defaults to ``len(payload)``), payload, zero-padded to
+    64 bytes, no report id."""
     if len(payload) > HID_FEATURE_REPORT_BYTES - 2:
         raise ValueError("feature payload too long")
     body = bytes([msg_type & 0xFF, (len(payload) if length is None else length) & 0xFF]) + payload
@@ -271,21 +248,15 @@ RUMBLE_PAYLOAD = struct.Struct("<BHHHbb")   # MsgSimpleRumbleCmd (SDL: controlle
 
 def cmd_rumble(left: int, right: int, intensity: int = HAPTIC_INTENSITY_SYSTEM,
                left_gain: int = 2, right_gain: int = 0) -> bytes:
-    """``ID_TRIGGER_RUMBLE_CMD`` as sent by SDL ``HIDAPI_DriverSteamDeck_RumbleJoystick``
-    (unRumbleType 0, unIntensity, left/right motor speed 0..65535, gains 2/0).
-    Header length is **0**, byte-for-byte like both references known to work on real hardware:
-    SDL leaves ``msg->header.length`` at 0 and hid-steam's ``steam_haptic_rumble`` also sends 0
-    in that byte (``u8 report[11] = {ID_TRIGGER_RUMBLE_CMD, 0}``)."""
+    """``ID_TRIGGER_RUMBLE_CMD`` as SDL ``HIDAPI_DriverSteamDeck_RumbleJoystick`` sends it (type 0, intensity,
+    left/right 0..65535, gains 2/0). Header length stays **0** — both SDL and hid-steam's
+    ``steam_haptic_rumble`` send 0 there and that is what works on the hardware."""
     left = max(0, min(65535, int(left)))
     right = max(0, min(65535, int(right)))
     return build_feature_report(ID_TRIGGER_RUMBLE_CMD,
                                 RUMBLE_PAYLOAD.pack(0, intensity & 0xFFFF, left, right, left_gain, right_gain),
                                 length=0)
 
-
-# ---------------------------------------------------------------------------------------
-# Report parser (table-driven)
-# ---------------------------------------------------------------------------------------
 
 def map_buttons(buttons_low: int, buttons_high: int) -> int:
     canonical = 0
@@ -352,10 +323,6 @@ def decode_report(data: bytes) -> Dict[str, object]:
     })
     return decoded
 
-
-# ---------------------------------------------------------------------------------------
-# usbfs device wrapper
-# ---------------------------------------------------------------------------------------
 
 class UsbfsDevice:
     """Minimal synchronous usbfs client (claim/release, control, bulk/interrupt IN)."""
@@ -426,16 +393,12 @@ class UsbfsDevice:
         return self._read_buffer.raw[:received]
 
 
-# ---------------------------------------------------------------------------------------
-# The source
-# ---------------------------------------------------------------------------------------
-
 class NeptuneError(RuntimeError):
     pass
 
 
 class NeptuneUsbSource:
-    """InputSource for the built-in controller. See module docstring."""
+    """InputSource for the built-in controller."""
 
     name = "neptune_usb"
 
@@ -461,7 +424,6 @@ class NeptuneUsbSource:
         self.heartbeats = 0
         self.heartbeat_errors = 0
 
-    # --- lifecycle ------------------------------------------------------------------
     def open(self) -> None:
         if self._opened:
             return
@@ -513,8 +475,7 @@ class NeptuneUsbSource:
             except OSError:
                 pass
             usb_device.close()
-        # Give the interfaces back to usbhid (all capture interfaces, not just the ones we detached:
-        # a previous crashed run may have left some unbound).
+        # all capture interfaces, not only the ones we detached: a crashed run may have left others unbound
         try:
             rebound = neptune_mod.release_interfaces(self.device, self._binder)
             if rebound:
@@ -524,7 +485,6 @@ class NeptuneUsbSource:
         self.detached = []
         self._opened = False
 
-    # --- feature reports ------------------------------------------------------------
     def send_feature(self, report: bytes, timeout_ms: int = 1000) -> None:
         if self.usb_device is None:
             raise NeptuneError("device not open")
@@ -573,7 +533,6 @@ class NeptuneUsbSource:
         except (OSError, NeptuneError) as exc:
             log.debug("rumble failed: %s", exc)
 
-    # --- hot path -------------------------------------------------------------------
     def read(self, timeout: float) -> Optional[ControllerState]:
         usb_device = self.usb_device
         if usb_device is None:

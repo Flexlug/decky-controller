@@ -1,6 +1,3 @@
-/**
- * Quick Access Menu panel (docs/ARCHITECTURE.md).
- */
 import {
   ButtonItem,
   DropdownItem,
@@ -39,7 +36,7 @@ import {
   type Status,
 } from "./types";
 
-/** While the panel is open, re-read status this often (cable/DRD changes while idle). */
+/** Poll while the panel is open — cable/DRD change while idle. */
 const POLL_MS = 4000;
 
 type Tone = "good" | "warn" | "bad" | "off";
@@ -57,12 +54,7 @@ const PROFILE_OPTIONS = dropdownOptions(PROFILE_LABELS);
 const KILL_COMBO_OPTIONS = dropdownOptions(KILL_COMBO_LABELS);
 const PADDLE_OPTIONS = dropdownOptions(PADDLE_ACTION_LABELS);
 
-/**
- * One read-only status line: label on the left, coloured dot + value on the right.
- * Values are kept <= 14 characters (see types.ts); should one still not fit next to the label,
- * `inlineWrap="shift-children-below"` drops it under the label and the text may wrap - it never
- * runs past the panel edge.
- */
+/** Status line: label left, dot + value right; `shift-children-below` keeps a long value inside the panel. */
 const StatusRow: FC<{ label: string; value: ReactNode; tone: Tone; description?: ReactNode }> = ({
   label,
   value,
@@ -110,16 +102,13 @@ function drdRow(status: Status): RowInfo {
       };
 }
 
-/** Session states in which our gadget is bound, so `udc_state` / `host_connected` mean something. */
+/** States in which our gadget is bound, so `udc_state` / `host_connected` mean something. */
 const GADGET_BOUND_STATES: ReadonlySet<Status["session_state"]> = new Set(["GADGET_UP", "WAITING_HOST", "ACTIVE"]);
 
 const PLUG_INTO_PC = "Plug the Deck into a PC with a USB-C data cable.";
 
-/**
- * Cable/Host row. While the gadget is bound the row is "Host" and reflects enumeration (`udc_state`);
- * while idle `udc_state` is always "not attached", so the row shows what the port physically sees
- * (`cable_kind`, see docs/ARCHITECTURE.md). Values stay <= 14 characters; no PD-contract/voltage wording.
- */
+/** "Host" + enumeration while the gadget is bound; otherwise what the port physically sees (`cable_kind`).
+ *  Values <= 14 characters, never volts/amps/"PD contract". */
 function cableRow(status: Status): RowInfo & { label: string } {
   if (!status.drd_enabled) return { label: "Cable", value: "N/A", tone: "off", description: "Requires DRD." };
   if (GADGET_BOUND_STATES.has(status.session_state)) {
@@ -162,7 +151,7 @@ function cableRow(status: Status): RowInfo & { label: string } {
     default:
       break;
   }
-  // Older backend without cable_kind: fall back to UDC/extcon only.
+  // older backend without cable_kind
   if (status.host_connected) {
     return { label: "Cable", value: "PC", tone: "good", description: "Plugged into a PC. Ready to start." };
   }
@@ -190,7 +179,7 @@ function modeRow(status: Status): RowInfo {
   const label = SESSION_STATE_LABELS[status.session_state] ?? status.session_state;
   if (status.session_state === "ACTIVE") {
     const profile = status.active_profile ? PROFILE_LABELS[status.active_profile] : "";
-    // Backend sends hz rounded to 0.1 ("249.9"); show a whole number and keep the value <= 14 chars.
+    // whole number keeps the value <= 14 chars
     const hz = status.metrics?.hz ? ` · ${Math.round(status.metrics.hz)}Hz` : "";
     return { value: `${label}${hz}`, tone: "good", description: `${profile}${status.transport ? ` via ${status.transport}` : ""}` };
   }

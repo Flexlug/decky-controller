@@ -1,22 +1,11 @@
-"""Screen handling while controller mode is active: display sleep + touch-to-wake.
+"""Display sleep while controller mode is active, plus touch-to-wake.
 
-Three strategies, tried in this order when ``method="auto"``:
-
-1. :class:`GamescopeSleep` — **Gaming Mode**. gamescope listens on the Wayland socket
-   ``$XDG_RUNTIME_DIR/gamescope-0`` (``/run/user/1000`` for user ``deck``) and exposes the ConVar
-   ``drm_sleep_internal_screen`` ("Force the internal screen to be asleep"); this is what Steam's own
-   idle "turn off screen" uses and it really powers the OLED panel down.  We set it through the
-   ``gamescopectl`` CLI (``gamescopectl drm_sleep_internal_screen 1|0``).
-2. :class:`KscreenDpms` — **Desktop Mode** (KDE ``kwin_wayland``): ``kscreen-doctor --dpms off|on``
-   run as the ``deck`` user against ``/run/user/1000/wayland-0``.  Optional, may be unavailable.
-3. :class:`Backlight` — ``/sys/class/backlight/amdgpu_bl0/brightness`` = 0.  On the OLED Deck this only
-   dims the panel to its minimum (verified on the device), so it is the last resort.  The previous
-   brightness is saved to a state file (``/run/deckgadget/brightness``, fallback ``/tmp``) **before**
-   being set to 0 so the recovery path (``guard.recover``) can restore it even after a crash.
-
-Touch wake: the FTS3528 touchscreen stays alive with the screen asleep; we read its evdev node
-(``struct input_event``) in a thread and wake the screen for ``touch_wake_seconds`` on every touch
-(with the *same* method that put it to sleep) so the user can press "Stop" in the Decky modal.
+Strategies, tried in this order for ``method="auto"``: gamescope (Gaming Mode — the
+``drm_sleep_internal_screen`` ConVar via ``gamescopectl``, the same thing Steam's idle screen-off uses;
+really powers the panel down), kscreen (Desktop Mode — ``kscreen-doctor --dpms`` as the ``deck`` user),
+backlight (``amdgpu_bl0/brightness`` = 0 — on the OLED this only dims to the minimum, so it is the last
+resort; the previous value is written to a state file first so ``guard.recover`` can restore it after a
+crash). The FTS3528 touchscreen stays alive while the panel sleeps; its evdev node is read in a thread.
 """
 from __future__ import annotations
 
@@ -40,13 +29,12 @@ TOUCHSCREEN_NAME_SUBSTR = "FTS3528"
 STATE_DIRS = ("/run/deckgadget", "/tmp/deckgadget")
 STATE_FILE_NAME = "brightness"
 
-# Display-sleep strategies (gamescope / kscreen).
 RUN_USER_BASE = "/run/user"
 DECK_UID = 1000
 DECK_GID = 1000
 DECK_RUNTIME_DIR = os.path.join(RUN_USER_BASE, str(DECK_UID))
 GAMESCOPE_SOCKET_PREFIX = "gamescope-"
-GAMESCOPECTL = "gamescopectl"                    # /usr/bin/gamescopectl on SteamOS
+GAMESCOPECTL = "gamescopectl"
 GAMESCOPE_SLEEP_CONVAR = "drm_sleep_internal_screen"
 KSCREEN_DOCTOR = "kscreen-doctor"
 KDE_WAYLAND_DISPLAY = "wayland-0"
@@ -124,11 +112,8 @@ class Backlight:
         return saved
 
     def save_and_off(self) -> bool:
-        """Save the current brightness and switch the backlight off.
-
-        Returns ``True`` when the backlight was actually turned off, ``False`` when there is
-        no backlight device (the caller must not report the screen as off in that case).
-        """
+        """Save the current brightness and switch the backlight off; ``False`` when there is no
+        backlight device (the caller must not report the screen as off then)."""
         if not self.available:
             log.warning("backlight %s not available; screen off skipped", self.directory)
             return False
@@ -169,10 +154,6 @@ class Backlight:
         return value
 
 
-# --------------------------------------------------------------------------------------
-# Command runner (injectable for tests)
-# --------------------------------------------------------------------------------------
-
 class CommandResult(NamedTuple):
     """Outcome of :func:`run_command`; ``returncode`` is ``None`` when the command never finished."""
     returncode: Optional[int]
@@ -196,16 +177,11 @@ CommandRunner = Callable[..., CommandResult]
 
 def run_command(argv: List[str], env: Dict[str, str], timeout: float = COMMAND_TIMEOUT_S,
                 user: Optional[Tuple[int, int]] = None) -> CommandResult:
-    """Run ``argv`` with exactly ``env``, capture output, never raise.
-
-    ``user=(uid, gid)`` drops privileges in the child.  ``subprocess`` does the setgid/setuid itself
-    (``user=``/``group=``/``extra_groups=`` are handled by ``_posixsubprocess`` between fork and exec),
-    which — unlike ``preexec_fn`` — is safe in a multi-threaded daemon.
-    """
+    """Run ``argv`` with exactly ``env``, capture output, never raise. ``user=(uid, gid)`` drops privileges
+    via subprocess's own ``user=``/``group=`` (done between fork and exec — unlike ``preexec_fn``, thread-safe)."""
     kwargs: Dict[str, object] = {}
     if user is not None and (int(user[0]) != os.geteuid() or int(user[1]) != os.getegid()):
-        # Only switch when we are not that user already (root on the Deck); a non-root dev box
-        # running as uid 1000 needs no setgroups/setgid/setuid (which would fail with EPERM).
+        # Already that user (non-root dev box): setgroups/setuid would fail with EPERM.
         kwargs.update(user=int(user[0]), group=int(user[1]), extra_groups=[])
     try:
         completed = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -223,11 +199,8 @@ def run_command(argv: List[str], env: Dict[str, str], timeout: float = COMMAND_T
 
 
 def _resolve_binary(name_or_path: str) -> Optional[str]:
-    """Absolute path for ``name_or_path``; ``None`` if absent.
-
-    System directories are checked before ``PATH``: the daemon runs as root and must not pick up a
-    same-named binary from whatever PATH the supervisor happened to export.
-    """
+    """Absolute path for ``name_or_path``; ``None`` if absent. System directories win over ``PATH`` —
+    the daemon runs as root and must not pick up a same-named binary from an inherited PATH."""
     if os.path.isabs(name_or_path):
         return name_or_path if os.path.isfile(name_or_path) else None
     for directory in ("/usr/bin", "/usr/local/bin", "/bin"):
@@ -243,10 +216,6 @@ def _is_socket(path: str) -> bool:
     except OSError:
         return False
 
-
-# --------------------------------------------------------------------------------------
-# Strategies
-# --------------------------------------------------------------------------------------
 
 class ScreenMethod:
     """Common interface of the screen-off strategies.  Every call is best-effort and never raises."""
@@ -274,11 +243,8 @@ class ScreenMethod:
 
 def find_gamescope_socket(run_user_base: str = RUN_USER_BASE, prefer_uid: int = DECK_UID,
                           runtime_dir: Optional[str] = None) -> Optional[Tuple[str, str]]:
-    """``(runtime_dir, display_name)`` of a live gamescope Wayland socket, or ``None``.
-
-    Scans ``<run_user_base>/<uid>/gamescope-*`` (``runtime_dir`` restricts the scan to one directory).
-    The ``deck`` user's directory (uid ``prefer_uid``) wins over others, ``gamescope-0`` over higher numbers.
-    """
+    """``(runtime_dir, display_name)`` of a live gamescope Wayland socket under ``<run_user_base>/<uid>/``,
+    or ``None``; ``prefer_uid``'s directory wins, then ``gamescope-0`` over higher numbers."""
     if runtime_dir:
         dirs = [runtime_dir]
     else:
@@ -324,7 +290,6 @@ class GamescopeSleep(ScreenMethod):
         self.runtime_dir: Optional[str] = None
         self.display: Optional[str] = None
 
-    # -- discovery --------------------------------------------------------------------
     def discover(self) -> Optional[str]:
         """Locate the socket; returns its path (and caches ``runtime_dir``/``display``)."""
         if self._runtime_dir and self._display:
@@ -344,7 +309,6 @@ class GamescopeSleep(ScreenMethod):
         return os.path.join(runtime_dir, display) if runtime_dir and display else None
 
     def binary(self) -> Optional[str]:
-        # An explicitly injected path is trusted (tests; unusual installs).
         return self._binary if self._binary else _resolve_binary(GAMESCOPECTL)
 
     def available(self) -> bool:
@@ -357,7 +321,6 @@ class GamescopeSleep(ScreenMethod):
             "GAMESCOPE_WAYLAND_DISPLAY": self.display or "gamescope-0",
         }
 
-    # -- actions ----------------------------------------------------------------------
     def _set(self, asleep: bool) -> bool:
         what = "sleep" if asleep else "wake"
         try:
@@ -374,10 +337,8 @@ class GamescopeSleep(ScreenMethod):
         except Exception as exc:  # noqa: BLE001 - never raise
             log.warning("gamescope %s failed: %s", what, exc)
             return False
-        # gamescopectl exits 0 even when gamescope does not know the ConVar (it prints
-        # "Command not found." — verified with gamescope 3.16); only a connection failure
-        # ("Failed to open GAMESCOPE_WAYLAND_DISPLAY.") gives rc=1.  Treat both as failure so
-        # ``auto`` falls through instead of believing the panel is asleep.
+        # gamescopectl exits 0 even for an unknown ConVar (prints "Command not found.", seen on gamescope 3.16);
+        # only a connection failure gives rc=1. Both must count as failure or ``auto`` would believe the panel sleeps.
         output = result.tail()
         if result.ok and "command not found" not in output.lower():
             log.info("gamescope display %s (%s=%s via %s)", what, GAMESCOPE_SLEEP_CONVAR, "1" if asleep else "0",
@@ -463,7 +424,7 @@ class KscreenDpms(ScreenMethod):
 
 
 class BacklightDim(ScreenMethod):
-    """Fallback: :class:`Backlight` brightness 0 (state file + safe restore, unchanged semantics)."""
+    """Fallback: backlight brightness 0, restored from the state file."""
 
     name = "backlight"
 
@@ -476,7 +437,6 @@ class BacklightDim(ScreenMethod):
 
     def sleep(self) -> bool:
         if not self._engaged:
-            # First time: remember the brightness (memory + state file), then 0.
             ok = self.backlight.save_and_off()
             self._engaged = ok
             return ok
@@ -499,10 +459,6 @@ class BacklightDim(ScreenMethod):
     def info(self) -> Dict[str, object]:
         return {"available": self.available(), "dir": self.backlight.directory}
 
-
-# --------------------------------------------------------------------------------------
-# Touchscreen
-# --------------------------------------------------------------------------------------
 
 def find_touchscreen(sysfs: str = "/sys", dev: str = "/dev",
                      name_substr: str = TOUCHSCREEN_NAME_SUBSTR) -> Optional[str]:
@@ -611,19 +567,13 @@ class TouchWatcher:
                     break
 
 
-# --------------------------------------------------------------------------------------
-# Controller
-# --------------------------------------------------------------------------------------
-
 class ScreenController:
-    """Coordinates screen-off (gamescope → kscreen → backlight) + touch wake for the session.
+    """Screen-off (gamescope → kscreen → backlight) plus touch wake for one session.
 
-    ``activate()`` when entering CAPTURING picks the method (``method="auto"`` tries the strategies in
-    order and keeps the first one whose ``sleep()`` succeeds; an explicit method is used alone) and
-    remembers it: touch wake / re-sleep / ``deactivate()`` all go through the *same* strategy, and the
-    backlight is never touched while gamescope or kscreen is in charge.
-    ``on_change(off: bool, method: str)`` is called whenever the effective screen state changes, plus
-    once at activation with ``(False, "none")`` when no strategy could turn the screen off.
+    ``activate()`` keeps the first strategy whose ``sleep()`` succeeds; touch wake, re-sleep and
+    ``deactivate()`` all go through that same strategy (the backlight is never touched while gamescope or
+    kscreen is in charge). ``on_change(off, method)`` fires on every effective change, plus once with
+    ``(False, "none")`` at activation when nothing could turn the screen off.
     """
 
     def __init__(self, backlight: Optional[Backlight] = None, touch_event: Optional[str] = None,
@@ -698,11 +648,9 @@ class ScreenController:
             self._active = True
             self._method = self._choose_and_sleep()
             if self._method is not None:
-                # Only report "screen off" (-> {"ev":"screen","off":true,"method":...}) when it really is.
                 self._set_off(True)
             elif self.on_change:
-                # Nothing worked: say so explicitly ({"ev":"screen","off":false,"method":"none"}) — the
-                # backend otherwise infers Status.screen_off from the settings while CAPTURING+.
+                # Say so explicitly: the backend would otherwise infer screen_off from the settings.
                 try:
                     self.on_change(False, "none")
                 except Exception as exc:  # noqa: BLE001
@@ -763,12 +711,10 @@ class ScreenController:
             watcher.stop()
         try:
             if method is not None:
-                # Permanent wake with the SAME method; gamescope/kscreen never touch the backlight.
                 if not method.release():
                     log.warning("screen release via %s reported failure", method.name)
             elif was_active or self._off or self.backlight.saved_value() is not None:
-                # Nothing was in charge (or a stale state file from a crashed backlight session): the
-                # old backlight semantics — restore only what we saved, and never to 0.
+                # Nothing was in charge, or a crashed backlight session left a state file: restore only what we saved.
                 self.backlight.restore(forget=True)
         except Exception as exc:  # noqa: BLE001
             log.warning("cannot restore the screen: %s", exc)

@@ -1,19 +1,5 @@
-"""Recovery guard: idempotent "undo everything" used by ``deckgadget recover`` and the session.
-
-Steps (each best-effort, each safe to repeat):
-
-1. configfs: unbind and delete every gadget under ``/sys/kernel/config/usb_gadget/deckctl*``;
-2. raw-gadget: nothing to do — the gadget disappears with the owning process (fd close);
-3. Neptune: rebind ``<dev>:1.0``, ``:1.1``, ``:1.2`` to ``usbhid`` if they lost their driver,
-   then re-scan sysfs and report an error if any of them is still detached;
-4. display: wake the panel if a crashed session left it asleep — ``gamescopectl
-   drm_sleep_internal_screen 0`` when a gamescope socket exists (Gaming Mode) and
-   ``kscreen-doctor --dpms on`` when a KDE Wayland session is reachable (Desktop Mode); both are
-   idempotent, failures are *warnings* (``report["warnings"]``), not errors;
-5. backlight: restore the brightness saved by :class:`~deckgadget.platform.screen.Backlight`.
-
-The function never raises; it returns a report dict describing what it did.
-"""
+"""Idempotent rollback of everything a session touches: configfs gadgets, Neptune's usbhid
+binding, display sleep, backlight. Best-effort, safe to repeat, never raises."""
 from __future__ import annotations
 
 import errno
@@ -58,12 +44,8 @@ def _unlink_quiet(path: str) -> bool:
 
 
 def _sweep_quiet(path: str) -> None:
-    """Bottom-up best-effort removal of whatever is left (symlinks, files, empty dirs).
-
-    On real configfs attribute files cannot be unlinked (EPERM) and default groups
-    (``strings``/``configs``/``functions``/``os_desc``) cannot be rmdir'ed — both fail quietly
-    and do not prevent the final ``rmdir`` of the gadget once user-created items are gone.
-    """
+    """Bottom-up best-effort removal of whatever is left. On configfs attribute files cannot be unlinked
+    and default groups cannot be rmdir'ed; both fail quietly and do not block the final gadget rmdir."""
     for root, dirs, files in os.walk(path, topdown=False):
         for name in files:
             _unlink_quiet(os.path.join(root, name))
@@ -77,22 +59,19 @@ def _sweep_quiet(path: str) -> None:
 
 
 def remove_configfs_gadget(gadget_dir: str) -> Dict[str, object]:
-    """Unbind from the UDC and tear the configfs tree down (mirror of the configfs spike's ``down``)."""
+    """Unbind from the UDC and tear the configfs tree down."""
     report: Dict[str, object] = {"gadget": gadget_dir, "existed": os.path.isdir(gadget_dir), "removed": False}
     if not report["existed"]:
         return report
     udc_file = os.path.join(gadget_dir, "UDC")
     try:
-        # A bare "\n" (configfs spike: ``echo "" > UDC``) — gadget_dev_desc_UDC_store() strips the trailing
-        # newline and an empty name means "unregister".  Writing "" from Python issues no write(2)
-        # at all (TextIOWrapper drops empty strings), so the unbind would silently not happen.
+        # An empty UDC name means "unregister", but writing "" from Python issues no write(2) at all;
+        # the bare newline is what actually reaches gadget_dev_desc_UDC_store().
         write_text(udc_file, "\n")
         report["unbound"] = True
     except OSError as exc:
-        # ENODEV: the gadget was not bound to any UDC — nothing to unbind.
         report["unbound"] = False if exc.errno == errno.ENODEV else f"error: {exc}"
-    # Order matters on configfs: function symlinks first, then config strings/configs,
-    # then functions, then gadget strings, finally the gadget directory itself.
+    # configfs only lets the tree go in this order: function symlinks, configs, functions, strings, gadget.
     for config_dir in sorted(glob.glob(os.path.join(gadget_dir, "configs", "*"))):
         for entry in sorted(os.listdir(config_dir)):
             entry_path = os.path.join(config_dir, entry)
@@ -115,11 +94,8 @@ def remove_configfs_gadget(gadget_dir: str) -> Dict[str, object]:
 
 def wake_display(gamescope: Optional[ScreenMethod] = None, kscreen: Optional[ScreenMethod] = None,
                  warnings: Optional[List[str]] = None) -> Dict[str, object]:
-    """Best-effort, idempotent display wake (step 4 of :func:`recover`).
-
-    Returns ``{"gamescope": {...}, "kscreen": {...}}``; each entry has ``available`` and, when the
-    compositor was reachable, ``woken``.  Failures are appended to ``warnings`` (never raised).
-    """
+    """Best-effort display wake. Returns ``{"gamescope": {...}, "kscreen": {...}}`` with ``available``
+    and, when the compositor was reachable, ``woken``; failures go to ``warnings``, never raised."""
     warnings = warnings if warnings is not None else []
     result: Dict[str, object] = {}
     for method in (gamescope if gamescope is not None else GamescopeSleep(),
@@ -144,26 +120,19 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
             backlight_dir: str = BACKLIGHT_DIR, state_file: Optional[str] = None,
             gadget_prefix: str = GADGET_PREFIX, gamescope: Optional[ScreenMethod] = None,
             kscreen: Optional[ScreenMethod] = None) -> Dict[str, object]:
-    """Full idempotent rollback. Never raises.
-
-    ``gamescope`` / ``kscreen`` override the display-wake strategies (tests inject fakes; the
-    defaults discover the real sockets).
-    """
+    """Full idempotent rollback; never raises. ``gamescope``/``kscreen`` override the wake strategies."""
     report: Dict[str, object] = {"ok": True, "gadgets": [], "neptune": None, "display": None,
                                  "backlight": None, "errors": [], "warnings": []}
     errors: List[str] = report["errors"]  # type: ignore[assignment]
     warnings: List[str] = report["warnings"]  # type: ignore[assignment]
 
-    # 1. configfs gadgets
     for gadget_dir in list_gadgets(configfs, gadget_prefix):
         try:
             report["gadgets"].append(remove_configfs_gadget(gadget_dir))  # type: ignore[union-attr]
         except Exception as exc:  # noqa: BLE001
             errors.append(f"gadget {gadget_dir}: {exc}")
 
-    # 2. raw-gadget: owned by the (now dead) daemon process; nothing persistent to undo.
-
-    # 3. Neptune -> usbhid
+    # raw-gadget needs nothing here: the gadget dies with the daemon's fd.
     try:
         device = neptune_mod.find_neptune(sysfs, dev)
         if device is None:
@@ -172,9 +141,8 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
             binder = neptune_mod.UsbhidBinder(sysfs)
             bind_errors: List[str] = []
             rebound = neptune_mod.release_interfaces(device, binder, errors=bind_errors)
-            # Verify instead of trusting the writes: a failed/ignored ``bind`` would otherwise leave
-            # the Deck without its controller while we report success.  ``bind``/``drivers_probe``
-            # probe synchronously, so a re-scan right away is authoritative.
+            # Re-scan instead of trusting the writes: bind/drivers_probe probe synchronously, so this is
+            # authoritative, and a silently ignored bind would otherwise leave the Deck without its controller.
             rescanned = neptune_mod.find_neptune(sysfs, dev)
             still_captured = ([interface.name for number in neptune_mod.CAPTURE_INTERFACES
                                if (interface := rescanned.interface(number)) is not None
@@ -189,13 +157,12 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
     except Exception as exc:  # noqa: BLE001
         errors.append(f"neptune: {exc}")
 
-    # 4. display sleep (gamescope / kscreen): a crashed session must never leave the panel asleep.
+    # A crashed session must never leave the panel asleep.
     try:
         report["display"] = wake_display(gamescope, kscreen, warnings)
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"display: {exc}")
 
-    # 5. backlight
     try:
         backlight = Backlight(backlight_dir, state_file or default_state_file())
         restored = backlight.restore(forget=True)
