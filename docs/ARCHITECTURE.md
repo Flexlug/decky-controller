@@ -6,14 +6,15 @@ For contributors and coding agents. This is the condensed contract between the t
 ## Overview
 
 ```
-Quick Access Menu (src/*)  --callables/events-->  main.py (Decky backend, root)
+Quick Access Menu (src/*)  --callables/events-->  main.py + py_modules/controller_backend (Decky backend, root)
                                                      |  subprocess: python3 -m deckgadget run …  (JSON-lines on stdout)
                                                      v
                                    py_modules/deckgadget (daemon: capture Neptune -> profile.pack -> USB gadget)
 ```
 
 * The **frontend** is a React panel in the Quick Access Menu; it only talks to the backend.
-* The **backend** (`main.py`, runs as root inside Decky Loader) owns settings, starts/stops the daemon, relays its
+* The **backend** (`main.py` glue + `py_modules/controller_backend`, runs as root inside Decky Loader) owns settings,
+  starts/stops the daemon, relays its
   events as `status`, and guarantees rollback (`deckgadget recover`) on load, after every daemon exit and on unload.
 * The **daemon** (`py_modules/deckgadget`) is a normal Python package and CLI: it captures the built‑in controller
   through usbfs, packs reports into the selected profile and pushes them to the PC through a USB gadget.
@@ -36,33 +37,55 @@ Frontend (`src/`, TypeScript/React, bundled by rollup into `dist/index.js`):
 | `store.ts` | tiny module‑level store for the latest Status/Settings (survives panel unmounts) |
 | `types.ts` | Status/Settings/enum types, defaults, UI labels (≤ 14 chars for status values and dropdown options) |
 
-Backend (`main.py`): `class Plugin` with the callables below, a JSON settings store in
-`DECKY_PLUGIN_SETTINGS_DIR/settings.json`, the daemon supervisor (spawn, stdout/stderr pumps, SIGTERM → SIGKILL →
-`recover`), a 2 s status loop, and a built‑in `decky` shim so `import main` works off‑Deck.
+Backend — `main.py` is Decky glue only (imports `decky`, routes the package loggers to Decky's log, builds the
+`Service`, `class Plugin` with the callables below); the logic lives in `py_modules/controller_backend/`, which never
+imports `decky` or `deckgadget` (it gets logger/emit/directories injected and runs the daemon as a subprocess). It
+may import `deckhw` (read-only sysfs facts, shared with the daemon):
+
+| module | role |
+|---|---|
+| `settings.py` | allowed values, `DEFAULT_SETTINGS`, `sanitize_settings`, `SettingsStore` (`settings.json`, atomic writes) |
+| `daemon/launcher.py` | interpreter/module/cwd, `run_args` from the settings, environment (`LD_LIBRARY_PATH` dropped), pidfile/log paths |
+| `daemon/supervisor.py` | `DaemonSupervisor`: spawn, stdout/stderr pumps, SIGTERM → SIGKILL, pidfile, stale-daemon kill, exit callback |
+| `daemon/events.py` | stdout JSON-lines contract: event names, session states, parsing |
+| `daemon/commands.py` | one-shot `status` / `recover` runs with timeouts, CLI status normalisation, `RecoverReport` |
+| `session.py` | `SessionView`: the session as seen from the events (`STOPPED` → `STOPPING` until the process is gone) |
+| `status.py` | `hardware_facts` (via `deckhw`), `build_status` (CLI first, sysfs fallback, session view), connectivity signature |
+| `diagnostics.py` | the Diagnostics dump (status, settings, daemon info, last recover, log tails) |
+| `service.py` | `Service`: start/stop under one lock, recover policy (load, every exit, stop), 2 s / 5 s status loop, emits |
+
+Shared (`py_modules/deckhw/`): `sysfs.py` (tree reader), `drd.py`, `udc.py`, `extcon.py`, `cable.py`, `neptune.py`
+(device discovery), `port.py` (`PortStatus`) — read-only, no ioctl, no writes.
 
 Daemon (`py_modules/deckgadget/`):
 
 | module | role |
 |---|---|
-| `__main__.py` | CLI: `run \| demo \| status \| recover \| probe` |
+| `__main__.py` | CLI: `run \| demo \| status \| recover \| probe`; `collect_status` assembles the `status` JSON |
 | `config.py` | allowed values + validation of the run options (profiles, transports, kill combos, paddles, screen methods); resolves `transport=auto` |
 | `state.py` | canonical `ControllerState` (own button numbering, sticks, triggers, pads, sensors) |
-| `session.py` | the session state machine, kill‑combo hold detector, unplug detection, hot loop |
-| `sources/base.py` | `InputSource` protocol |
-| `sources/neptune_usb.py` | exclusive capture of the built‑in controller via usbfs (claim interface 2, bulk reads, 64‑byte report parser per SDL, lizard‑off, heartbeat) |
-| `sources/demo.py` | synthetic source (sine sticks, blinking A) for `demo` |
-| `profiles/base.py` | `Profile` protocol: USB descriptors + `pack(state) -> bytes` + `on_output(bytes)` |
+| `session.py` | the session state machine, kill‑combo hold detector, unplug detection, hot loop; `build_session` wires source/profile/transport/screen |
+| `sources/base.py`, `sources/demo.py` | `InputSource` protocol; synthetic source (sine sticks, blinking A) for `demo` |
+| `sources/neptune/protocol.py` | the Deck's 64‑byte input report: layout, button tables, `parse_report` / `decode_report` (SDL) |
+| `sources/neptune/commands.py` | feature reports sent to the controller: lizard‑off, heartbeat, rumble (SDL) |
+| `sources/neptune/source.py` | `NeptuneUsbSource`: exclusive capture over usbfs (claim interface 2, heartbeat thread, rebind on close) |
+| `profiles/base.py` | `Profile` protocol: USB descriptors + `pack(state) -> bytes` + `on_output(bytes)` + EP0 `handle_control` |
 | `profiles/xbox360.py` | XInput profile: wired Xbox 360 descriptors (VID 045E / PID 028E, vendor 0x21), 20‑byte report, LED/rumble OUT |
 | `profiles/hid_gamepad.py` | generic HID gamepad (6 × int8 axes, hat, 16 buttons) |
-| `transports/base.py` | `Transport` protocol, latest‑report slot (newest wins, drops counted), metrics |
-| `transports/usb_raw_gadget.py` | `/dev/raw-gadget` transport: answers EP0 itself, IN/OUT worker threads, clean teardown on DISCONNECT |
+| `transports/base.py` | `Transport` protocol, latest‑report slot (newest wins, drops counted), metrics, thread interrupt helpers |
+| `transports/rawgadget/transport.py` | `/dev/raw-gadget` transport: lifecycle, event loop, IN/OUT worker threads, endpoint teardown |
+| `transports/rawgadget/control.py` | EP0 handling: standard device requests, interface/endpoint recipients, delegation to the profile |
 | `transports/usb_hid.py` | configfs + `f_hid` transport (`/sys/kernel/config/usb_gadget/deckctl_hid`, `/dev/hidgN`) |
-| `platform/usb_role.py` | read‑only inspection: DRD detection, UDC name/state, extcon cables, cable power / PD contract, `cable_kind` |
-| `platform/neptune.py` | find 28de:1205, its interfaces, usbfs device path; unbind/rebind `usbhid` |
-| `platform/screen.py` | display sleep strategies (gamescope / kscreen / backlight) + touch‑to‑wake |
-| `platform/guard.py` | `recover()`: idempotent "undo everything" |
-| `util/ioctl.py` | ctypes `ioctl` (releases the GIL) + `_IOC` macros |
-| `util/log.py` | stderr/file logging + JSON‑lines event sink on stdout |
+| `platform/usbfs.py` | usbfs client (ctypes structs, `USBDEVFS_*` ioctls, `UsbfsDevice`) — nothing Deck‑specific |
+| `platform/rawgadget/ioctls.py`, `platform/rawgadget/device.py` | raw‑gadget ioctl ABI (`raw_gadget.h`) and `RawGadgetDevice` |
+| `platform/neptune_binding.py` | the only place that writes `usbhid` bind/unbind: `UsbhidBinder`, capture/release interfaces |
+| `platform/display/base.py` | `ScreenMethod` protocol, backlight state‑file location |
+| `platform/display/backlight.py` | `Backlight` (save/dim/restore; never restores to 0), `BacklightDim` strategy |
+| `platform/display/compositor.py` | `run_command`, `GamescopeSleep` (`gamescopectl drm_sleep_internal_screen`), `KscreenDpms` |
+| `platform/display/touch.py` | touchscreen discovery and the evdev `TouchWatcher` (touch‑to‑wake) |
+| `platform/display/controller.py` | `ScreenController`: picks the first strategy whose sleep works, wake/re‑sleep on touch |
+| `platform/guard.py` | `recover()`: idempotent "undo everything" in four steps (gadgets, rebind, wake, backlight) |
+| `util/fs.py`, `util/ioctl.py`, `util/log.py` | file helpers; ctypes `ioctl` (releases the GIL) + `_IOC` macros; stderr/file logging + JSON‑lines event sink |
 
 ## Backend callables
 
@@ -121,7 +144,7 @@ xbox360, `hid` for hid_gamepad; xbox360 over `hid` is rejected — `f_hid` canno
 the backend clamps the setting to 200..10000); `touch_wake_seconds` (0, 120] (backend clamps to 1..60);
 `paddles.*` ∈ {`none`, `A`, `B`, `X`, `Y`, `LB`, `RB`, `L3`, `R3`, `VIEW`, `MENU`, `DPAD_UP`,
 `DPAD_DOWN`, `DPAD_LEFT`, `DPAD_RIGHT`}. The single source of truth for these lists is
-`py_modules/deckgadget/config.py`; `main.py` and `src/types.ts` mirror them.
+`py_modules/deckgadget/config.py`; `py_modules/controller_backend/settings.py` and `src/types.ts` mirror them.
 
 ## Daemon CLI and events
 

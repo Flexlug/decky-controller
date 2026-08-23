@@ -14,19 +14,21 @@ import _path  # noqa: F401
 from deckgadget import state as S
 from deckgadget.platform import neptune_binding
 from deckhw.neptune import CONTROLLER_INTERFACE, find_neptune
-from deckgadget.sources import neptune_usb as N
+from deckgadget.sources.neptune import commands as CMD
+from deckgadget.sources.neptune import protocol as P
+from deckgadget.sources.neptune.source import NeptuneError, NeptuneUsbSource
 from fakes import FakeSysfs
 
-SET_FEATURE = (N.USB_REQTYPE_SET_CLASS_INTERFACE, N.HID_REQ_SET_REPORT, N.FEATURE_WVALUE, CONTROLLER_INTERFACE)
-GET_FEATURE = (N.USB_REQTYPE_GET_CLASS_INTERFACE, N.HID_REQ_GET_REPORT, N.FEATURE_WVALUE, CONTROLLER_INTERFACE)
-HEARTBEAT_TAIL = N.heartbeat_sequence()[1]
+SET_FEATURE = (CMD.USB_REQTYPE_SET_CLASS_INTERFACE, CMD.HID_REQ_SET_REPORT, CMD.FEATURE_WVALUE, CONTROLLER_INTERFACE)
+GET_FEATURE = (CMD.USB_REQTYPE_GET_CLASS_INTERFACE, CMD.HID_REQ_GET_REPORT, CMD.FEATURE_WVALUE, CONTROLLER_INTERFACE)
+HEARTBEAT_TAIL = CMD.heartbeat_sequence()[1]
 
 
 def make_report(buttons_low=0, buttons_high=0, packet=1, lstick=(0, 0), rstick=(0, 0), trig=(0, 0), gyro=(0, 0, 0)):
-    body = N.REPORT_STRUCT.pack(N.VALVE_IN_REPORT_MSG_VERSION, N.ID_CONTROLLER_DECK_STATE, N.REPORT_LEN, packet,
+    body = P.REPORT_STRUCT.pack(P.VALVE_IN_REPORT_MSG_VERSION, P.ID_CONTROLLER_DECK_STATE, P.REPORT_LEN, packet,
                                 buttons_low, buttons_high, 0, 0, 0, 0, 0, 0, 0, *gyro, 0, 0, 0, 0, *trig,
                                 *lstick, *rstick, 0, 0)
-    return body.ljust(N.REPORT_LEN, b"\0")
+    return body.ljust(P.REPORT_LEN, b"\0")
 
 
 class FakeUsbfsDevice:
@@ -123,7 +125,7 @@ class NeptuneSourceTest(unittest.TestCase):
             return device
 
         with mock.patch.object(neptune_binding, "UsbhidBinder", lambda sysfs: KernelBinder(sysfs, self.fs)):
-            source = N.NeptuneUsbSource(sysfs=self.fs.sys, dev=self.fs.dev, heartbeat_s=heartbeat_s,
+            source = NeptuneUsbSource(sysfs=self.fs.sys, dev=self.fs.dev, heartbeat_s=heartbeat_s,
                                         device_class=factory, with_sensors=with_sensors)
         self.addCleanup(source.close)
         return source
@@ -140,8 +142,8 @@ class NeptuneSourceTest(unittest.TestCase):
         self.assertTrue(self.captured())
         self.assertEqual(device.claims, [2])
         self.assertEqual(device.disconnect_claims, [])
-        self.assertEqual(device.feature_payloads, N.lizard_off_sequence())
-        self.assertEqual(device.control_ins, [(GET_FEATURE, N.HID_FEATURE_REPORT_BYTES)])
+        self.assertEqual(device.feature_payloads, CMD.lizard_off_sequence())
+        self.assertEqual(device.control_ins, [(GET_FEATURE, CMD.HID_FEATURE_REPORT_BYTES)])
         self.assertEqual(source.ep_in, 0x83)
 
     def test_open_is_idempotent(self):
@@ -159,14 +161,14 @@ class NeptuneSourceTest(unittest.TestCase):
 
     def test_open_without_neptune_raises(self):
         empty = FakeSysfs(os.path.join(self.tmp, "empty"))
-        source = N.NeptuneUsbSource(sysfs=empty.sys, dev=empty.dev, device_class=FakeUsbfsDevice)
-        with self.assertRaises(N.NeptuneError):
+        source = NeptuneUsbSource(sysfs=empty.sys, dev=empty.dev, device_class=FakeUsbfsDevice)
+        with self.assertRaises(NeptuneError):
             source.open()
 
     def test_open_without_controller_interface_raises(self):
         shutil.rmtree(self.fs.interface(2))
         source = self.make_source()
-        with self.assertRaises(N.NeptuneError):
+        with self.assertRaises(NeptuneError):
             source.open()
         self.assertFalse(self.captured())
 
@@ -183,7 +185,7 @@ class NeptuneSourceTest(unittest.TestCase):
         source.open()
         device = self.devices[0]
         device.reports.extend([
-            make_report(buttons_low=N.STEAMDECK_LBUTTON_A, lstick=(-1000, 2000), trig=(32767, 0), packet=7),
+            make_report(buttons_low=P.STEAMDECK_LBUTTON_A, lstick=(-1000, 2000), trig=(32767, 0), packet=7),
             b"\x01\x00\x04\x40" + b"\0" * 60,
             None,
         ])
@@ -203,7 +205,7 @@ class NeptuneSourceTest(unittest.TestCase):
 
     def test_read_propagates_device_errors_and_needs_open(self):
         source = self.make_source()
-        with self.assertRaises(N.NeptuneError):
+        with self.assertRaises(NeptuneError):
             source.read(0.05)
         source.open()
         self.devices[0].reports.append(OSError(errno.ENODEV, "gone"))
@@ -217,7 +219,7 @@ class NeptuneSourceTest(unittest.TestCase):
         self.assertTrue(device.second_heartbeat.wait(1.0))
         self.assertGreaterEqual(source.heartbeats, 1)
         heartbeat_payloads = device.feature_payloads[2:]
-        self.assertEqual(heartbeat_payloads[:2], N.heartbeat_sequence())
+        self.assertEqual(heartbeat_payloads[:2], CMD.heartbeat_sequence())
         source.close()
         sent_after_close = len(device.control_outs)
         time.sleep(0.03)
@@ -240,7 +242,7 @@ class NeptuneSourceTest(unittest.TestCase):
         source.rumble(1, 2)
         source.open()
         source.rumble(1000, 70000)
-        self.assertEqual(self.devices[0].feature_payloads[-1], N.cmd_rumble(1000, 65535))
+        self.assertEqual(self.devices[0].feature_payloads[-1], CMD.cmd_rumble(1000, 65535))
 
     def test_send_feature_rejects_wrong_length(self):
         source = self.make_source()

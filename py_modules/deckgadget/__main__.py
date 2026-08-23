@@ -14,8 +14,9 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import __version__
 from . import config as C
@@ -78,7 +79,10 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
     from deckhw.neptune import find_neptune
     from deckhw.port import read_port_status
 
-    from .platform import guard, screen
+    from .platform import guard
+    from .platform.display.backlight import Backlight
+    from .platform.display.compositor import GamescopeSleep, KscreenDpms
+    from .platform.display.touch import find_touchscreen
 
     out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": []}
     out["kernel"] = os.uname().release
@@ -102,19 +106,19 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"gadgets: {exc}")
     try:
-        backlight = screen.Backlight()
+        backlight = Backlight()
         out["backlight"] = {"available": backlight.available,
                             "brightness": backlight.brightness() if backlight.available else None,
                             "max": backlight.max_brightness() if backlight.available else None,
                             "saved": backlight.saved_value(), "state_file": backlight.state_file}
         out["screen_off"] = bool(backlight.available and backlight.brightness() == 0
                                  and backlight.saved_value() is not None)
-        out["touchscreen"] = screen.find_touchscreen(sysfs, dev)
+        out["touchscreen"] = find_touchscreen(sysfs, dev)
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"screen: {exc}")
     try:
-        gamescope = screen.GamescopeSleep()
-        kscreen = screen.KscreenDpms()
+        gamescope = GamescopeSleep()
+        kscreen = KscreenDpms()
         backlight_available = bool(out.get("backlight", {}).get("available")) if isinstance(out.get("backlight"), dict) else False
         # what would work right now; auto tries gamescope -> kscreen -> backlight
         out["screen_methods"] = {"gamescope": gamescope.available(), "kscreen": kscreen.available(),
@@ -170,68 +174,79 @@ def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
-    from .sources.neptune_usb import NeptuneUsbSource, decode_report, parse_report
-    from .state import button_names
+    from .sources.neptune.source import NeptuneUsbSource
 
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
     if os.geteuid() != 0:
         print("probe needs root (usbfs + sysfs unbind)", file=sys.stderr)
     source = NeptuneUsbSource(with_sensors=args.sensors)
-    stop = {"flag": False}
-
-    def on_signal(signum, _frame) -> None:
-        stop["flag"] = True
-
-    signal.signal(signal.SIGINT, on_signal)
-    signal.signal(signal.SIGTERM, on_signal)
-    emit = (lambda payload: print(json.dumps(payload, ensure_ascii=False, default=str), flush=True)) if args.json else None
+    stop = threading.Event()
+    signal.signal(signal.SIGINT, lambda signum, frame: stop.set())
+    signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
     try:
         source.open()
         print(f"probe: device {source.device.name if source.device else '?'} ep 0x{source.ep_in:02x}; "
               f"press buttons — {args.seconds:.0f}s (Ctrl+C to stop). Kill combo is NOT active here.",
               file=sys.stderr, flush=True)
-        deadline = time.monotonic() + args.seconds
-        last_buttons: Optional[int] = None
-        last_summary = 0.0
-        count = 0
-        other = 0
-        while not stop["flag"] and time.monotonic() < deadline:
-            raw = source.read_raw(0.1)
-            if raw is None:
-                continue
-            decoded = decode_report(raw)
-            if not decoded.get("deck_state"):
-                other += 1
-                if args.all:
-                    print(f"[other type={decoded.get('type')}] {raw.hex()}", flush=True)
-                continue
-            count += 1
-            state = parse_report(raw, time.monotonic(), with_sensors=args.sensors)
-            buttons = state.buttons if state else 0
-            changed = buttons != last_buttons
-            now = time.monotonic()
-            if args.all or changed or now - last_summary >= 0.5:
-                if emit:
-                    emit({"raw": raw.hex(), "decoded": decoded, "canonical": state.as_dict() if state else None})
-                else:
-                    if changed or args.all:
-                        print(f"raw: {raw.hex()}")
-                        print(f"  packet={decoded['packet']} L={decoded['buttons_l']} H={decoded['buttons_h']} "
-                              f"bits={decoded['buttons']} unknown={decoded['unknown_bits']}")
-                        print(f"  canonical={button_names(buttons)}")
-                    print(f"  sticks L={decoded['lstick']} R={decoded['rstick']} trig L={decoded['trigger_l']} R={decoded['trigger_r']}"
-                          + (f" lpad={decoded['lpad']} rpad={decoded['rpad']} gyro={decoded['gyro']} accel={decoded['accel']}"
-                             if args.sensors else ""), flush=True)
-                last_summary = now
-                last_buttons = buttons
-        print(f"probe done: {count} state reports, {other} other packets, heartbeats={source.heartbeats}",
-              file=sys.stderr, flush=True)
+        state_reports, other_packets = _probe_capture(source, args, stop)
+        print(f"probe done: {state_reports} state reports, {other_packets} other packets, "
+              f"heartbeats={source.heartbeats}", file=sys.stderr, flush=True)
         return 0
     except Exception as exc:  # noqa: BLE001
         print(f"probe failed: {exc}", file=sys.stderr)
         return 1
     finally:
         source.close()
+
+
+def _probe_capture(source, args: argparse.Namespace, stop: threading.Event) -> Tuple[int, int]:
+    """Read raw reports until ``--seconds`` elapse or ``stop`` is set; print a line when the buttons change or
+    every 0.5 s (every report with ``--all``). Returns (state reports, other packets)."""
+    from .sources.neptune.protocol import decode_report, parse_report
+
+    deadline = time.monotonic() + args.seconds
+    last_buttons: Optional[int] = None
+    last_summary = 0.0
+    state_reports = 0
+    other_packets = 0
+    while not stop.is_set() and time.monotonic() < deadline:
+        raw = source.read_raw(0.1)
+        if raw is None:
+            continue
+        decoded = decode_report(raw)
+        if not decoded.get("deck_state"):
+            other_packets += 1
+            if args.all:
+                print(f"[other type={decoded.get('type')}] {raw.hex()}", flush=True)
+            continue
+        state_reports += 1
+        state = parse_report(raw, time.monotonic(), with_sensors=args.sensors)
+        buttons = state.buttons if state else 0
+        changed = buttons != last_buttons
+        now = time.monotonic()
+        if args.all or changed or now - last_summary >= 0.5:
+            _print_probe_report(raw, decoded, state, changed, args)
+            last_summary = now
+            last_buttons = buttons
+    return state_reports, other_packets
+
+
+def _print_probe_report(raw: bytes, decoded: Dict[str, Any], state, changed: bool, args: argparse.Namespace) -> None:
+    from .state import button_names
+
+    if args.json:
+        print(json.dumps({"raw": raw.hex(), "decoded": decoded, "canonical": state.as_dict() if state else None},
+                         ensure_ascii=False, default=str), flush=True)
+        return
+    if changed or args.all:
+        print(f"raw: {raw.hex()}")
+        print(f"  packet={decoded['packet']} L={decoded['buttons_l']} H={decoded['buttons_h']} "
+              f"bits={decoded['buttons']} unknown={decoded['unknown_bits']}")
+        print(f"  canonical={button_names(state.buttons if state else 0)}")
+    sensors = (f" lpad={decoded['lpad']} rpad={decoded['rpad']} gyro={decoded['gyro']} accel={decoded['accel']}"
+               if args.sensors else "")
+    print(f"  sticks L={decoded['lstick']} R={decoded['rstick']} trig L={decoded['trigger_l']} R={decoded['trigger_r']}"
+          + sensors, flush=True)
 
 
 def main(argv: Optional[List[str]] = None) -> int:

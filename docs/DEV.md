@@ -7,8 +7,11 @@ Architecture and contracts: [ARCHITECTURE.md](ARCHITECTURE.md); verified hardwar
 
 ```
 src/              frontend (TypeScript/React, @decky/ui + @decky/api)  -> dist/index.js (rollup)
-main.py           Decky backend (class Plugin): callables, settings, daemon supervisor, events
+main.py           Decky glue: imports decky, wires the backend service, class Plugin (callables)
 py_modules/
+  controller_backend/   the backend: settings, daemon/ (launcher, supervisor, events, commands), session,
+                  status, diagnostics, service
+  deckhw/         read-only hardware facts from sysfs (shared by backend and daemon)
   deckgadget/     daemon + core: python3 -m deckgadget run|demo|status|recover|probe
 tests/            stdlib unittest suite for the core (no hardware needed)
 scripts/build-zip.sh   packages out/decky-controller.zip
@@ -39,8 +42,10 @@ pnpm test             # = python3 -m compileall -q py_modules main.py && python3
 ```
 
 Tests run on any Linux host (Python ≥ 3.11); everything that touches sysfs/configfs/usbfs takes injectable
-paths and is exercised against fake trees in a temp dir. `python3 -c "import main"` works without Decky (a
-small `decky` shim is built in), and `(cd py_modules && python3 -m deckgadget status)` runs on any Linux box.
+paths and is exercised against fake trees in a temp dir. The backend is importable without Decky
+(`cd py_modules && python3 -c "import controller_backend.service"`; only `main.py` needs the `decky` module —
+tests stub it via `tests/decky_stub.py`), and `(cd py_modules && python3 -m deckgadget status)` runs on any
+Linux box.
 
 ## Packaging
 
@@ -90,7 +95,7 @@ sysfs unbind, usbfs and `/dev/raw-gadget`.
 
 ### Screen off (`--screen-off`, `--screen-method`)
 
-`--screen-method auto|gamescope|kscreen|backlight` (default `auto`; `main.py` does not pass it, so the backend
+`--screen-method auto|gamescope|kscreen|backlight` (default `auto`; the backend does not pass it, so it
 always uses `auto`). Strategies, tried in this order by `auto` — the first one whose sleep succeeds is kept for
 the whole session (touch wake / re‑sleep / final wake all use the same one):
 
@@ -134,7 +139,7 @@ panel is asleep when it is not. When no strategy works the daemon emits `{"ev":"
 **directory** name (`~/homebrew/plugins/decky-controller`, the zip's top‑level folder), not from
 `plugin.json`'s `name` — hence `decky-controller` below, not `Decky Controller`.
 
-* Decky backend log (everything `main.py` logs, plus every daemon stdout/stderr line prefixed `[deckgadget]`):
+* Decky backend log (everything the backend logs, plus every daemon stdout/stderr line prefixed `[deckgadget]`):
   `~/homebrew/logs/decky-controller/` (Decky → Settings → Developer → *Show plugin logs* shows the same), and
   `journalctl -u plugin_loader` for the loader itself.
 * Daemon log file (`--log-file`, written by the backend‑started daemon):
@@ -153,8 +158,11 @@ When touching any side, keep these aligned (see [ARCHITECTURE.md](ARCHITECTURE.m
 
 * callables `get_status`, `start(profile)`, `stop`, `get_settings`, `set_settings(settings)`,
   `get_diagnostics` — `src/api.ts` ↔ `main.py:Plugin`;
-* events `status` (Status) and `toast` ({title, body, severity}) — `src/index.tsx` ↔ `main.py`;
-* daemon CLI flags — `main.py:_Backend._daemon_args` ↔ `py_modules/deckgadget/__main__.py:_add_run_args`;
-* daemon stdout events — `py_modules/deckgadget/util/log.py:JsonEventSink` ↔ `main.py:_on_daemon_event`;
-* allowed values (profiles, transports, kill combos, paddle targets) — `main.py` constants ↔
+* events `status` (Status) and `toast` ({title, body, severity}) — `src/index.tsx` ↔
+  `py_modules/controller_backend/service.py`;
+* daemon CLI flags — `py_modules/controller_backend/daemon/launcher.py:run_args` ↔
+  `py_modules/deckgadget/__main__.py:_add_run_args`;
+* daemon stdout events — `py_modules/deckgadget/util/log.py:JsonEventSink` ↔
+  `py_modules/controller_backend/session.py:SessionView.apply`;
+* allowed values (profiles, transports, kill combos, paddle targets) — `py_modules/controller_backend/settings.py` ↔
   `py_modules/deckgadget/config.py` ↔ `src/types.ts`.

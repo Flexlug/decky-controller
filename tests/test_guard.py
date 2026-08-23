@@ -6,7 +6,8 @@ from unittest import mock
 
 import _path  # noqa: F401
 
-from deckgadget.platform import guard, neptune_binding, screen
+from deckgadget.platform import guard, neptune_binding
+from deckgadget.platform.display.base import ScreenMethod
 from deckhw.neptune import find_neptune
 from fakes import FakeSysfs, read, write
 
@@ -68,7 +69,7 @@ class NeptuneDiscoveryTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.fs.usbhid, "bind")), "3-3:1.2")
 
 
-class FakeDisplay(screen.ScreenMethod):
+class FakeDisplay(ScreenMethod):
     """Scriptable display-sleep strategy (gamescope / kscreen stand-in) for recover()."""
 
     def __init__(self, name, available=False, wake_ok=True, raise_exc=None):

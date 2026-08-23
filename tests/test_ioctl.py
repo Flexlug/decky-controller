@@ -8,7 +8,7 @@ from deckgadget.util import ioctl as I
 
 class IocMacroTest(unittest.TestCase):
     def test_usbfs_struct_layouts_match_kernel_abi(self):
-        from deckgadget.sources import neptune_usb as N
+        from deckgadget.platform import usbfs as N
 
         self.assertEqual(ctypes.sizeof(N.UsbfsCtrlTransfer), 24)
         self.assertEqual(ctypes.sizeof(N.UsbfsBulkTransfer), 24)
@@ -52,11 +52,12 @@ class RawGadgetIoctlArgTest(unittest.TestCase):
         I._libc = self._saved
 
     def _dev(self):
-        from deckgadget.transports import usb_raw_gadget as R
+        from deckgadget.platform.rawgadget import ioctls
+        from deckgadget.platform.rawgadget.device import RawGadgetDevice
 
-        dev = R.RawGadgetDevice.__new__(R.RawGadgetDevice)   # no /dev/raw-gadget here
+        dev = RawGadgetDevice.__new__(RawGadgetDevice)   # no /dev/raw-gadget here
         dev.path, dev.fd = "fake", 42
-        return R, dev
+        return ioctls, dev
 
     def test_ep_disable_passes_handle_by_value(self):
         R, dev = self._dev()

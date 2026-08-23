@@ -1,6 +1,11 @@
-"""Shared test doubles: a composable fake ``/sys`` tree plus small file helpers."""
+"""Shared test doubles: a composable fake ``/sys`` tree, small file helpers, display fakes."""
 import os
 import socket
+
+import _path  # noqa: F401
+
+from deckgadget.platform.display.base import ScreenMethod
+from deckgadget.platform.display.compositor import CommandResult
 
 
 def write(path, text):
@@ -173,3 +178,53 @@ class FakeSysfs:
         os.makedirs(os.path.join(gadget, "functions", "hid.usb0"))
         os.symlink(os.path.join(gadget, "functions", "hid.usb0"), os.path.join(gadget, "configs", "c.1", "hid.usb0"))
         return gadget
+
+
+
+class FakeRunner:
+    """Injected command runner for the compositor methods: records (argv, env, timeout, user), returns canned results."""
+
+    def __init__(self, rc=0, stdout="", stderr="", error=None):
+        self.calls = []
+        self.rc = rc
+        self.stdout = stdout
+        self.stderr = stderr
+        self.error = error
+        self.raise_exc = None
+
+    def __call__(self, argv, env, timeout, user=None):
+        self.calls.append({"argv": list(argv), "env": dict(env), "timeout": timeout, "user": user})
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        return CommandResult(self.rc, self.stdout, self.stderr, self.error)
+
+    @property
+    def argvs(self):
+        return [call["argv"] for call in self.calls]
+
+
+class FakeScreenMethod(ScreenMethod):
+    """Scriptable screen-off strategy (records its calls) for controller / guard tests."""
+
+    def __init__(self, name, available=True, sleep_ok=True, wake_ok=True):
+        self.name = name
+        self._available = available
+        self.sleep_ok = sleep_ok
+        self.wake_ok = wake_ok
+        self.calls = []
+
+    def available(self):
+        self.calls.append("available")
+        return self._available
+
+    def sleep(self):
+        self.calls.append("sleep")
+        return self.sleep_ok
+
+    def wake(self):
+        self.calls.append("wake")
+        return self.wake_ok
+
+    def release(self):
+        self.calls.append("release")
+        return self.wake_ok

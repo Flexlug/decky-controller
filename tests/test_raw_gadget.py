@@ -18,7 +18,8 @@ from deckgadget.profiles import xbox360 as X
 from deckgadget.profiles.base import Feedback, USB_DT_HID_REPORT
 from deckgadget.state import ControllerState
 from deckgadget.transports import base as B
-from deckgadget.transports import usb_raw_gadget as R
+from deckgadget.platform.rawgadget import ioctls as IOC
+from deckgadget.transports.rawgadget import transport as R
 from fakes import FakeSysfs
 
 GET_DESCRIPTOR_IN = 0x80
@@ -154,10 +155,10 @@ def fake_ep_write_ioctl(device):
     """Stand-in for the module-level ``ioctl`` used by the IN writer: decodes ``struct usb_raw_ep_io``."""
 
     def fake_ioctl(fd, request, arg=0):
-        if request != R.USB_RAW_IOCTL_EP_WRITE:
+        if request != IOC.USB_RAW_IOCTL_EP_WRITE:
             raise AssertionError(f"unexpected ioctl 0x{request:x}")
         handle, _flags, length = struct.unpack_from("<HHI", arg.raw, 0)
-        device._record("ep_write", fd, handle, bytes(arg.raw[R.SZ_EP_IO:R.SZ_EP_IO + length]))
+        device._record("ep_write", fd, handle, bytes(arg.raw[IOC.SZ_EP_IO:IOC.SZ_EP_IO + length]))
         return length
 
     return fake_ioctl
@@ -380,7 +381,7 @@ class LifecycleTest(unittest.TestCase):
         return transport
 
     def configure(self):
-        self.device.events.put((R.USB_RAW_EVENT_CONTROL, setup_packet(0x00, SET_CONFIGURATION, 1)))
+        self.device.events.put((IOC.USB_RAW_EVENT_CONTROL, setup_packet(0x00, SET_CONFIGURATION, 1)))
         self.assertTrue(self.device.wait_for(lambda calls: ("configure",) in calls))
         self.assertTrue(self.device.wait_for(lambda calls: calls[-1] == ("ep0_read", 0)))
 
@@ -411,8 +412,8 @@ class LifecycleTest(unittest.TestCase):
 
     def test_connect_and_control_events_are_answered(self):
         transport = self.started()
-        self.device.events.put((R.USB_RAW_EVENT_CONNECT, b""))
-        self.device.events.put((R.USB_RAW_EVENT_CONTROL, setup_packet(GET_DESCRIPTOR_IN, 6, 0x0100, 0, 18)))
+        self.device.events.put((IOC.USB_RAW_EVENT_CONNECT, b""))
+        self.device.events.put((IOC.USB_RAW_EVENT_CONTROL, setup_packet(GET_DESCRIPTOR_IN, 6, 0x0100, 0, 18)))
         self.assertTrue(self.device.wait_for(lambda calls: any(call[0] == "ep0_write" for call in calls)))
         self.assertIn(("eps_info",), self.device.calls)
         self.assertEqual(self.device.calls_named("ep0_write"), [("ep0_write", transport.descriptors.device_descriptor())])
@@ -425,7 +426,7 @@ class LifecycleTest(unittest.TestCase):
         self.fs.set_udc_state("not attached")
         self.assertFalse(transport.connected())
         self.fs.set_udc_state("configured")
-        self.device.events.put((R.USB_RAW_EVENT_DISCONNECT, b""))
+        self.device.events.put((IOC.USB_RAW_EVENT_DISCONNECT, b""))
         self.assertTrue(self.device.wait_for(lambda calls: ("ep_disable", 2) in calls))
         self.assertEqual(self.device.calls_named("ep_disable"), [("ep_disable", 1), ("ep_disable", 2)])
         self.assertFalse(transport.connected())
@@ -433,7 +434,7 @@ class LifecycleTest(unittest.TestCase):
     def test_reset_tears_endpoints_down(self):
         transport = self.started(profile=H.HidGamepadProfile())
         self.configure()
-        self.device.events.put((R.USB_RAW_EVENT_RESET, b""))
+        self.device.events.put((IOC.USB_RAW_EVENT_RESET, b""))
         self.assertTrue(self.device.wait_for(lambda calls: ("ep_disable", 2) in calls))
         self.assertFalse(transport.connected())
 
@@ -453,7 +454,7 @@ class LifecycleTest(unittest.TestCase):
         transport = self.started()
         transport.descriptors = mock.Mock(wraps=transport.descriptors)
         transport.descriptors.device_descriptor.side_effect = OSError(errno.EIO, "io")
-        self.device.events.put((R.USB_RAW_EVENT_CONTROL, setup_packet(GET_DESCRIPTOR_IN, 6, 0x0100, 0, 18)))
+        self.device.events.put((IOC.USB_RAW_EVENT_CONTROL, setup_packet(GET_DESCRIPTOR_IN, 6, 0x0100, 0, 18)))
         self.assertTrue(self.device.wait_for(lambda calls: ("ep0_stall",) in calls))
         self.assertIsNone(transport.error)
         self.assertTrue(transport._event_thread.is_alive())
@@ -462,7 +463,7 @@ class LifecycleTest(unittest.TestCase):
         transport = self.started()
         transport.profile = mock.Mock(wraps=transport.profile)
         transport.profile.handle_control.side_effect = RuntimeError("boom")
-        self.device.events.put((R.USB_RAW_EVENT_CONTROL, setup_packet(0xC1, 0x01, 0, 0, 2)))
+        self.device.events.put((IOC.USB_RAW_EVENT_CONTROL, setup_packet(0xC1, 0x01, 0, 0, 2)))
         self.assertTrue(self.device.wait_for(lambda calls: ("ep0_stall",) in calls))
         transport._event_thread.join(1.0)
         self.assertFalse(transport._event_thread.is_alive())

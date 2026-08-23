@@ -64,7 +64,7 @@ class HoldDetector:
 
 
 class ScreenLike:
-    """Minimal interface the session needs from ``platform.screen.ScreenController``."""
+    """Minimal interface the session needs from ``platform.display.controller.ScreenController``."""
 
     def activate(self) -> None: ...
     def deactivate(self) -> None: ...
@@ -260,7 +260,7 @@ class Session:
 def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sysfs: str = "/sys",
                   dev: str = "/dev") -> Session:
     """Wire real components according to ``config`` (``config.demo`` selects the demo source)."""
-    from .platform.screen import ScreenController
+    from .platform.display.controller import ScreenController
     from deckhw.udc import Udc
     from .profiles import make_profile
     from .transports import make_transport
@@ -273,7 +273,7 @@ def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sys
         from .sources.demo import DemoSource
         source: InputSource = DemoSource()
     else:
-        from .sources.neptune_usb import NeptuneUsbSource
+        from .sources.neptune.source import NeptuneUsbSource
         source = NeptuneUsbSource(sysfs=sysfs, dev=dev)
     screen = None
     if config.screen_off:

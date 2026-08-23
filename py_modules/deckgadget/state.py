@@ -1,5 +1,5 @@
 """Canonical, source-agnostic controller state. Button bits are this package's own numbering, not the
-Deck wire format (that lives in ``sources/neptune_usb.py``)."""
+Deck wire format (that lives in ``sources/neptune/protocol.py``)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -8,7 +8,7 @@ from .base import ReportSlot, Transport, TransportError, TransportMetrics
 
 def make_transport(name: str, udc: Optional[str] = None) -> Transport:
     if name == "raw":
-        from .usb_raw_gadget import UsbRawGadgetTransport
+        from .rawgadget.transport import UsbRawGadgetTransport
         return UsbRawGadgetTransport(udc=udc)
     if name == "hid":
         from .usb_hid import UsbHidTransport

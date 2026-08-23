@@ -8,7 +8,7 @@ A Decky Loader plugin that turns a Steam Deck into a USB gamepad (XInput / gener
 USB‑C port. Three parts that talk over a fixed contract:
 
 ```
-src/ (React QAM panel)  --callables/events-->  main.py (Decky backend, root)
+src/ (React QAM panel)  --callables/events-->  main.py + py_modules/controller_backend (Decky backend, root)
                                                   |  subprocess: /usr/bin/python3 -m deckgadget run …  (JSON-lines on stdout)
                                                   v
                               py_modules/deckgadget (daemon: capture built-in controller -> profile.pack -> USB gadget)
@@ -42,8 +42,9 @@ python3 -m unittest discover -s tests -p 'test_config.py' -v            # one fi
 python3 -m unittest discover -s tests -p 'test_config.py' -k test_kill_combo   # one test
 ```
 
-Off‑Deck sanity checks that work on any Linux box: `python3 -c "import main"` (a built‑in `decky` shim makes
-the backend importable) and `(cd py_modules && python3 -m deckgadget status)` (read‑only JSON snapshot).
+Off‑Deck sanity checks that work on any Linux box: `(cd py_modules && python3 -c "import controller_backend.service")`
+(the backend needs no Decky; only `main.py` imports `decky`, which tests stub via `tests/decky_stub.py`) and
+`(cd py_modules && python3 -m deckgadget status)` (read‑only JSON snapshot).
 
 On the Deck (as root, from `~/homebrew/plugins/decky-controller/py_modules` or the repo's `py_modules/`):
 `python3 -m deckgadget run|demo|status|recover|probe` — `run`/`demo`/`probe` capture the controller and/or
@@ -59,23 +60,34 @@ Release: bump `version` in `package.json`, commit, `git tag v<version>`, push th
   `toast` events for the whole session and shows/hides the ACTIVE modal; `Content.tsx` is the panel;
   `actions.ts` calls the backend (`api.ts` typed `callable` wrappers) and pushes results into `store.ts`
   (module‑level store that survives panel unmounts); `types.ts` mirrors the backend enums/defaults.
-* **Backend** (`main.py`, one file): `class Plugin` exposes the six callables (`get_status`, `start`, `stop`,
-  `get_settings`, `set_settings`, `get_diagnostics`) — all async, all return JSON dicts, none raise (errors
-  come back as `{"ok": false, "error": …}`). `_Backend` is the daemon supervisor: spawns
-  `python3 -m deckgadget run …` with `cwd=<plugin>/py_modules` and `LD_LIBRARY_PATH` stripped, pumps its
-  stdout JSON‑lines into `status` events (`_on_daemon_event`), runs a 2 s status loop, and owns the settings
-  store. **`main.py` never imports `deckgadget`** — only executes it as a subprocess, so a broken core cannot
-  take the backend down. Allowed values (`PROFILES`, `KILL_COMBOS`, `PADDLE_ACTIONS`, …) are duplicated as
-  constants near the top of the file.
-* **Daemon** (`py_modules/deckgadget/`): `__main__.py` (CLI) → `config.py` (single source of truth for allowed
-  values + validation) → `session.py` (state machine `IDLE → CAPTURING → GADGET_UP → WAITING_HOST → ACTIVE →
-  STOPPING`, kill‑combo hold detector, unplug detection, hot loop). Pluggable protocols:
-  `sources/` (`InputSource`: `neptune_usb.py` = exclusive usbfs capture of the built‑in controller,
-  `demo.py` = synthetic), `profiles/` (`Profile`: USB descriptors + `pack(ControllerState) -> bytes`;
-  `xbox360.py`, `hid_gamepad.py`), `transports/` (`Transport`: `usb_raw_gadget.py` for xbox360 via
-  `/dev/raw-gadget`, `usb_hid.py` for configfs `f_hid`). `platform/` is read‑only hardware inspection
-  (`usb_role.py`), Neptune bind/unbind (`neptune.py`), screen sleep strategies (`screen.py`) and
-  `guard.py:recover()`. `state.py` is the canonical `ControllerState` with its own button numbering.
+* **Backend** (`main.py` + `py_modules/controller_backend/`): `main.py` is Decky glue only — imports `decky`,
+  routes the `controller_backend`/`deckhw` loggers to Decky's log, builds the `Service`, and `class Plugin`
+  exposes the six callables (`get_status`, `start`, `stop`, `get_settings`, `set_settings`,
+  `get_diagnostics`) — all async, all return JSON dicts, none raise (errors come back as
+  `{"ok": false, "error": …}`). The package: `settings.py` (allowed values, `sanitize_settings`,
+  `SettingsStore`), `daemon/` (`launcher.py` argv/env/paths, `supervisor.py` process lifecycle incl.
+  SIGTERM→SIGKILL and pidfile, `events.py` stdout contract, `commands.py` one-shot `status`/`recover`),
+  `session.py` (`SessionView` updated from daemon events), `status.py` (`hardware_facts` via `deckhw` +
+  `build_status`), `diagnostics.py`, `service.py` (`Service`: start/stop under one lock, recover policy, status
+  loop, emits). **The backend never imports `decky` (injected) or `deckgadget`** — the daemon only runs as a
+  subprocess with `cwd=<plugin>/py_modules` and `LD_LIBRARY_PATH` stripped, so a broken core cannot take the
+  backend down. It may import `deckhw` (read-only sysfs facts shared with the daemon).
+* **Shared** (`py_modules/deckhw/`): read‑only facts from sysfs, used by both backend and daemon — `sysfs.py`
+  (`Sysfs(root).text/int/hex/listdir/link_name`, the one place failed reads are logged), `drd.py`, `udc.py`
+  (`Udc`), `extcon.py`, `cable.py` (power, PD contract, `classify_cable`, `CABLE_KINDS`), `neptune.py`
+  (`find_neptune` → device/interfaces/endpoints), `port.py` (`PortStatus`). No ioctl, no writes.
+* **Daemon** (`py_modules/deckgadget/`): `__main__.py` (CLI + `collect_status`) → `config.py` (single source of
+  truth for allowed values + validation) → `session.py` (state machine `IDLE → CAPTURING → GADGET_UP →
+  WAITING_HOST → ACTIVE → STOPPING`, kill‑combo hold detector, unplug detection, hot loop). Pluggable
+  protocols: `sources/` (`InputSource`: `neptune/` = `protocol.py` report layout + `commands.py` feature
+  reports + `source.py` exclusive usbfs capture; `demo.py` synthetic), `profiles/` (`Profile`: USB descriptors
+  + `pack(ControllerState) -> bytes` + EP0 `handle_control`; `xbox360.py`, `hid_gamepad.py`), `transports/`
+  (`Transport`: `rawgadget/` = `transport.py` lifecycle/threads + `control.py` EP0 handling, for xbox360 via
+  `/dev/raw-gadget`; `usb_hid.py` for configfs `f_hid`). `platform/` is the kernel plumbing: `usbfs.py`
+  (usbfs client), `rawgadget/` (`ioctls.py` ABI + `device.py`), `neptune_binding.py` (the only writer of
+  usbhid bind/unbind), `display/` (`base`, `backlight`, `compositor` gamescope/kscreen, `touch`, `controller`),
+  `guard.py:recover()` in four steps. `state.py` is the canonical `ControllerState` with its own button
+  numbering.
 * **Rollback is the invariant.** Every exit path (kill combo, unplug, signal, exception, `stop`, unload,
   uninstall, backend start after a crash) ends in `guard.recover()`: delete configfs gadgets → rebind Neptune
   to `usbhid` → wake display → restore backlight. The backend also runs it at load, after *every* daemon exit
@@ -98,10 +110,10 @@ Release: bump `version` in `package.json`, commit, `git tag v<version>`, push th
 * Contract names (callables, event names, `Status`/`Settings` keys, CLI flags, enum values, module paths) are
   not renamed casually. When changing one, update all sides together:
   - callables — `src/api.ts` ↔ `main.py:Plugin`
-  - events `status` / `toast` — `src/index.tsx` ↔ `main.py`
-  - daemon CLI flags — `main.py:_Backend._daemon_args` ↔ `py_modules/deckgadget/__main__.py:_add_run_args`
-  - daemon stdout events — `py_modules/deckgadget/util/log.py:JsonEventSink` ↔ `main.py:_on_daemon_event`
-  - allowed values — `py_modules/deckgadget/config.py` (source of truth) ↔ `main.py` constants ↔ `src/types.ts`
+  - events `status` / `toast` — `src/index.tsx` ↔ `py_modules/controller_backend/service.py`
+  - daemon CLI flags — `py_modules/controller_backend/daemon/launcher.py:run_args` ↔ `py_modules/deckgadget/__main__.py:_add_run_args`
+  - daemon stdout events — `py_modules/deckgadget/util/log.py:JsonEventSink` ↔ `py_modules/controller_backend/session.py:SessionView.apply`
+  - allowed values — `py_modules/deckgadget/config.py` (source of truth) ↔ `py_modules/controller_backend/settings.py` ↔ `src/types.ts`
 
 ## Code style rules (project‑wide, from review)
 
@@ -125,20 +137,22 @@ Release: bump `version` in `package.json`, commit, `git tag v<version>`, push th
   add_gadget()` (layouts mirror a real Deck OLED), plus `write`, `read`, `make_socket`. Don't write private
   copies in a test file.
 * Everything that touches sysfs/configfs/usbfs/`/dev` takes injectable root paths as keyword args
-  (`guard.recover(sysfs=…, configfs=…, dev=…)`, `main._sysfs_snapshot(sysfs=…)`, `NeptuneUsbSource(...,
+  (`guard.recover(sysfs=…, configfs=…, dev=…)`, `Service(sysfs_root=…, dev_root=…, cli_runner=…)`, `NeptuneUsbSource(...,
   device_class=…)`, `UsbHidTransport(configfs=…, sysfs=…, dev=…, modprobe=False)`); collaborators are swapped
   with `mock.patch.object` or injected fakes (`FakeRawGadgetDevice`, `FakeUsbfsDevice`, screen methods,
-  `_Backend._run_cli`). Keep new code injectable the same way — never spawn the real daemon or touch the real
+  a `FakeCliRunner`). Keep new code injectable the same way — never spawn the real daemon or touch the real
   `/sys` in a test.
 * `tests/_path.py` (imported first in every test) puts `py_modules/` on `sys.path` and attaches a root
   `NullHandler` so the daemon/backend loggers stay quiet; use `assertLogs` when a log line is the assertion.
-* What is covered (and where): config/CLI (`test_config`), report parser + feature commands
-  (`test_neptune_parser`), capture lifecycle with a fake usbfs device (`test_neptune_source`), profiles
-  (`test_profiles`), session state machine (`test_session`), raw-gadget EP0 + lifecycle + `ReportSlot`
-  (`test_raw_gadget`), f_hid configfs transport (`test_usb_hid`), `recover()` (`test_guard`), screen
-  strategies (`test_screen`), cable classification (`test_usb_role`), usbfs ABI sizes / `_IOC`
-  (`test_ioctl`), the Decky backend (`test_main`), and the three-sided contract — value lists, Status/Settings
-  shapes, callables, events — across `config.py` ↔ `main.py` ↔ `src/*.ts` (`test_contract`). Not unit-testable
+* What is covered (and where): config/CLI (`test_config`), report layout/parser (`test_neptune_protocol`),
+  feature commands (`test_neptune_commands`), capture lifecycle with a fake usbfs device
+  (`test_neptune_source`), profiles (`test_profiles`), session state machine (`test_session`), raw-gadget EP0
+  + lifecycle + `ReportSlot` (`test_raw_gadget`), f_hid configfs transport (`test_usb_hid`), `recover()`
+  (`test_guard`), display strategies (`test_display_backlight/compositor/touch/controller`), `deckhw` port /
+  cable / UDC / DRD / `Sysfs` (`test_deckhw`), usbfs + raw-gadget ABI sizes / `_IOC` (`test_ioctl`), the Decky
+  backend per module (`test_backend_settings/daemon/session/status/service`) and its Decky
+  glue with a stubbed `decky` (`test_backend_plugin`), and the three-sided contract — value lists, Status/Settings
+  shapes, callables, events — across `config.py` ↔ `controller_backend` ↔ `src/*.ts` (`test_contract`). Not unit-testable
   and left to hands-on checks on the Deck: real usbfs/raw-gadget/extcon, gamescope, the Windows host, the
   `@decky/ui` panel.
 * Tests are constant-free: assert behaviour, not `CONSTANT == literal` (the only literals pinned are kernel
