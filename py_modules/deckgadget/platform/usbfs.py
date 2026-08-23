@@ -10,7 +10,7 @@ import errno
 import os
 from typing import Optional
 
-from ..util.ioctl import IO, IOR, IOW, IOWR, ioctl
+from deckgadget.util.ioctl import IO, IOR, IOW, IOWR, ioctl
 
 
 class UsbfsCtrlTransfer(ctypes.Structure):

@@ -11,14 +11,14 @@ import os
 import time
 from typing import Awaitable, Callable, Optional
 
-from .daemon.commands import CliRunner, normalize_cli_status, run_recover, run_status
-from .daemon.events import JsonDict
-from .daemon.launcher import DaemonPaths, run_args
-from .daemon.supervisor import DaemonSupervisor
-from .diagnostics import build_diagnostics
-from .session import SessionView, Toast
-from .settings import PROFILES, SettingsStore, resolve_transport
-from .status import build_status, connectivity_signature, hardware_facts
+from controller_backend.daemon.commands import CliRunner, normalize_cli_status, run_recover, run_status
+from controller_backend.daemon.events import JsonDict
+from controller_backend.daemon.launcher import DaemonPaths, run_args
+from controller_backend.daemon.supervisor import DaemonSupervisor
+from controller_backend.diagnostics import build_diagnostics
+from controller_backend.session import SessionView, Toast
+from controller_backend.settings import PROFILES, SettingsStore, resolve_transport
+from controller_backend.status import build_status, connectivity_signature, hardware_facts
 
 EmitCallback = Callable[[str, JsonDict], Awaitable[None]]
 

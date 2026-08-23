@@ -7,14 +7,13 @@ import glob
 import os
 from typing import Dict, List, Optional
 
+from deckgadget.platform import neptune_binding
+from deckgadget.platform.display.backlight import BACKLIGHT_DIR, Backlight
+from deckgadget.platform.display.base import ScreenMethod, default_state_file
+from deckgadget.platform.display.compositor import GamescopeSleep, KscreenDpms
+from deckgadget.util.fs import write_text
+from deckgadget.util.log import get_logger
 from deckhw.neptune import CAPTURE_INTERFACES, USBHID_DRIVER, find_neptune
-
-from ..util.fs import write_text
-from ..util.log import get_logger
-from . import neptune_binding
-from .display.backlight import BACKLIGHT_DIR, Backlight
-from .display.base import ScreenMethod, default_state_file
-from .display.compositor import GamescopeSleep, KscreenDpms
 
 log = get_logger("guard")
 

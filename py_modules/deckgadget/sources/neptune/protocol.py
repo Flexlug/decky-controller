@@ -7,8 +7,8 @@ from __future__ import annotations
 import struct
 from typing import Dict, Optional, Tuple
 
-from ... import state as S
-from ...state import ControllerState
+from deckgadget import state as S
+from deckgadget.state import ControllerState
 
 REPORT_LEN = 64
 VALVE_IN_REPORT_MSG_VERSION = 0x01            # SDL: controller_structs.h k_ValveInReportMsgVersion

@@ -12,13 +12,12 @@ import threading
 import time
 from typing import Optional
 
+from deckgadget.platform import guard
+from deckgadget.profiles.base import HidFunction, Profile
+from deckgadget.transports.base import FeedbackCallback, ReportSlot, TransportError, TransportMetrics
+from deckgadget.util.fs import write_bytes, write_text
+from deckgadget.util.log import get_logger
 from deckhw.udc import Udc, udc_names
-
-from ..platform import guard
-from ..profiles.base import HidFunction, Profile
-from ..util.log import get_logger
-from ..util.fs import write_bytes, write_text
-from .base import FeedbackCallback, ReportSlot, TransportError, TransportMetrics
 
 log = get_logger("usb_hid")
 

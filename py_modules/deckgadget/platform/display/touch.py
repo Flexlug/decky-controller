@@ -9,9 +9,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+from deckgadget.util.log import get_logger
 from deckhw.sysfs import Sysfs
-
-from ...util.log import get_logger
 
 log = get_logger("screen")
 

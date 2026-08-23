@@ -7,8 +7,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .events import JsonDict, parse_json_object
-from .launcher import DaemonPaths, SUBPROCESS_LINE_LIMIT, daemon_command, daemon_environment
+from controller_backend.daemon.events import JsonDict, parse_json_object
+from controller_backend.daemon.launcher import DaemonPaths, SUBPROCESS_LINE_LIMIT, daemon_command, daemon_environment
 
 log = logging.getLogger("controller_backend.daemon.commands")
 

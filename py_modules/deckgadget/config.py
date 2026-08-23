@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
-from . import state as S
+from deckgadget import state as S
 
 PROFILES = ("xbox360", "hid_gamepad")
 TRANSPORTS = ("auto", "raw", "hid")

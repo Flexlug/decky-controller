@@ -17,12 +17,12 @@ from __future__ import annotations
 import struct
 from typing import Dict, Optional
 
-from .. import state as S
-from ..state import ControllerState
-from .base import (
+from deckgadget import state as S
+from deckgadget.profiles.base import (
     USB_TYPE_STANDARD, Feedback, GadgetDescriptors, HidFunction, ReadData, SetupPacket,
     endpoint_descriptor,
 )
+from deckgadget.state import ControllerState
 
 VID = 0x045E
 PID = 0x028E

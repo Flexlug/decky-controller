@@ -6,11 +6,10 @@ from __future__ import annotations
 import os
 from typing import Dict, Optional
 
+from deckgadget.platform.display.base import ScreenMethod, default_state_file
+from deckgadget.util.fs import read_text, write_text
+from deckgadget.util.log import get_logger
 from deckhw.sysfs import Sysfs
-
-from ...util.fs import read_text, write_text
-from ...util.log import get_logger
-from .base import ScreenMethod, default_state_file
 
 log = get_logger("screen")
 

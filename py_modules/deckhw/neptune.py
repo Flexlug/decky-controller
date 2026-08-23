@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .sysfs import Sysfs
+from deckhw.sysfs import Sysfs
 
 NEPTUNE_VID = "28de"
 NEPTUNE_PID = "1205"

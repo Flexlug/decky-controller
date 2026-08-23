@@ -2,7 +2,7 @@
 idle it reads "not attached" even with a PC on the cable."""
 from typing import List, Optional
 
-from .sysfs import Sysfs
+from deckhw.sysfs import Sysfs
 
 UDC_STATE_CONFIGURED = "configured"
 

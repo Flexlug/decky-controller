@@ -12,8 +12,8 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, runtime_checkable
 
-from ..profiles.base import Feedback, Profile
-from ..util.log import get_logger
+from deckgadget.profiles.base import Feedback, Profile
+from deckgadget.util.log import get_logger
 
 log = get_logger("transport")
 

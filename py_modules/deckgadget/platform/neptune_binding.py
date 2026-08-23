@@ -4,11 +4,10 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 
+from deckgadget.util.fs import write_text
+from deckgadget.util.log import get_logger
 from deckhw.neptune import CAPTURE_INTERFACES, USBHID_DRIVER, NeptuneDevice
 from deckhw.sysfs import Sysfs
-
-from ..util.fs import write_text
-from ..util.log import get_logger
 
 log = get_logger("neptune")
 

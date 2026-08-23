@@ -19,19 +19,19 @@ from typing import Optional
 
 from deckhw.udc import UDC_STATE_CONFIGURED, Udc, udc_names
 
-from ...platform.rawgadget.device import DEFAULT_DEVICE, RawGadgetDevice
-from ...platform.rawgadget.ioctls import (
+from deckgadget.platform.rawgadget.device import DEFAULT_DEVICE, RawGadgetDevice
+from deckgadget.platform.rawgadget.ioctls import (
     EVENT_NAMES, SZ_EP_IO, USB_RAW_EVENT_CONNECT, USB_RAW_EVENT_CONTROL, USB_RAW_EVENT_DISCONNECT,
     USB_RAW_EVENT_RESET, USB_RAW_EVENT_RESUME, USB_RAW_EVENT_SUSPEND, USB_RAW_IOCTL_EP_WRITE, USB_SPEED,
 )
-from ...profiles.base import GadgetDescriptors, Profile
-from ...util.ioctl import ioctl
-from ...util.log import get_logger
-from ..base import (
+from deckgadget.profiles.base import GadgetDescriptors, Profile
+from deckgadget.util.ioctl import ioctl
+from deckgadget.util.log import get_logger
+from deckgadget.transports.base import (
     FeedbackCallback, ReportSlot, TransportError, TransportMetrics, install_cancel_signal_handler,
     join_with_interrupts,
 )
-from .control import ControlHandler
+from deckgadget.transports.rawgadget.control import ControlHandler
 
 log = get_logger("raw_gadget")
 

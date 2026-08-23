@@ -3,11 +3,11 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
-from .cable import cable_power, classify_cable, pd_contract
-from .drd import detect_drd
-from .extcon import extcon_cables
-from .sysfs import Sysfs
-from .udc import UDC_STATE_CONFIGURED, Udc
+from deckhw.cable import cable_power, classify_cable, pd_contract
+from deckhw.drd import detect_drd
+from deckhw.extcon import extcon_cables
+from deckhw.sysfs import Sysfs
+from deckhw.udc import UDC_STATE_CONFIGURED, Udc
 
 
 @dataclass

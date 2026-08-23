@@ -6,8 +6,8 @@ import os
 import sys
 from typing import Any, Optional
 
-from .daemon.launcher import DaemonPaths, PYTHON_BIN
-from .daemon.supervisor import DaemonSupervisor
+from controller_backend.daemon.launcher import DaemonPaths, PYTHON_BIN
+from controller_backend.daemon.supervisor import DaemonSupervisor
 
 log = logging.getLogger("controller_backend.diagnostics")
 

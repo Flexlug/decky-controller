@@ -11,12 +11,12 @@ from __future__ import annotations
 import struct
 from typing import Dict, Optional
 
-from .. import state as S
-from ..state import ControllerState
-from .base import (
+from deckgadget import state as S
+from deckgadget.profiles.base import (
     USB_DT_HID, USB_DT_HID_REPORT, USB_RECIP_INTERFACE, USB_REQ_GET_DESCRIPTOR, USB_TYPE_CLASS,
     USB_TYPE_STANDARD, Feedback, GadgetDescriptors, HidFunction, ReadData, SetupPacket, endpoint_descriptor,
 )
+from deckgadget.state import ControllerState
 
 VID = 0x1D6B   # Linux Foundation test id
 PID = 0x0104

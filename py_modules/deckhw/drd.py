@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
-from .sysfs import Sysfs
+from deckhw.sysfs import Sysfs
 
 log = logging.getLogger("deckhw.drd")
 

@@ -4,12 +4,11 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+from controller_backend.daemon.events import CAPTURED_STATES, JsonDict
+from controller_backend.session import SessionView
 from deckhw.neptune import find_neptune
 from deckhw.port import read_port_status
 from deckhw.sysfs import Sysfs
-
-from .daemon.events import CAPTURED_STATES, JsonDict
-from .session import SessionView
 
 DEFAULT_EXTCON: dict[str, int] = {"USB": 0, "USB-HOST": 0}
 

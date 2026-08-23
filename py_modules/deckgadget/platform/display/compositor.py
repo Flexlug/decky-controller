@@ -9,8 +9,8 @@ import stat
 import subprocess
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
-from ...util.log import get_logger
-from .base import ScreenMethod
+from deckgadget.platform.display.base import ScreenMethod
+from deckgadget.util.log import get_logger
 
 log = get_logger("screen")
 

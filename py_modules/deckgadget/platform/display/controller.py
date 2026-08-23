@@ -6,12 +6,12 @@ from __future__ import annotations
 import threading
 from typing import Callable, List, Optional
 
-from ...config import DEFAULT_SCREEN_METHOD, SCREEN_METHODS
-from ...util.log import get_logger
-from .backlight import Backlight, BacklightDim
-from .base import ScreenMethod
-from .compositor import GamescopeSleep, KscreenDpms
-from .touch import TouchWatcher, find_touchscreen
+from deckgadget.config import DEFAULT_SCREEN_METHOD, SCREEN_METHODS
+from deckgadget.platform.display.backlight import Backlight, BacklightDim
+from deckgadget.platform.display.base import ScreenMethod
+from deckgadget.platform.display.compositor import GamescopeSleep, KscreenDpms
+from deckgadget.platform.display.touch import TouchWatcher, find_touchscreen
+from deckgadget.util.log import get_logger
 
 log = get_logger("screen")
 

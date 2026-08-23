@@ -12,14 +12,14 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ...platform.rawgadget.device import RawGadgetDevice
-from ...profiles.base import (
+from deckgadget.platform.rawgadget.device import RawGadgetDevice
+from deckgadget.profiles.base import (
     USB_DT_CONFIG, USB_DT_DEVICE, USB_DT_DEVICE_QUALIFIER, USB_DT_OTHER_SPEED_CONFIG, USB_DT_STRING,
     USB_RECIP_DEVICE, USB_REQ_CLEAR_FEATURE, USB_REQ_GET_CONFIGURATION, USB_REQ_GET_DESCRIPTOR,
     USB_REQ_GET_INTERFACE, USB_REQ_GET_STATUS, USB_REQ_SET_CONFIGURATION, USB_REQ_SET_FEATURE,
     USB_REQ_SET_INTERFACE, USB_TYPE_STANDARD, GadgetDescriptors, Profile, SetupPacket,
 )
-from ...util.log import get_logger
+from deckgadget.util.log import get_logger
 
 log = get_logger("raw_gadget")
 

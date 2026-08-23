@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Dict, Optional
 
-from ...util.log import get_logger
+from deckgadget.util.log import get_logger
 
 log = get_logger("display")
 

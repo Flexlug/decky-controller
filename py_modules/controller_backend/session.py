@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .daemon.events import DAEMON_STOPPED_STATE, JsonDict, SESSION_STATES
+from controller_backend.daemon.events import DAEMON_STOPPED_STATE, JsonDict, SESSION_STATES
 
 log = logging.getLogger("controller_backend.session")
 

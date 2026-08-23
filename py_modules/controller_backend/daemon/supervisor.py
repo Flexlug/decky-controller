@@ -11,8 +11,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
 
-from .events import JsonDict
-from .launcher import DaemonPaths, SUBPROCESS_LINE_LIMIT, daemon_command, daemon_environment, is_deckgadget_pid
+from controller_backend.daemon.events import JsonDict
+from controller_backend.daemon.launcher import (
+    DaemonPaths, SUBPROCESS_LINE_LIMIT, daemon_command, daemon_environment, is_deckgadget_pid,
+)
 
 log = logging.getLogger("controller_backend.daemon.supervisor")
 

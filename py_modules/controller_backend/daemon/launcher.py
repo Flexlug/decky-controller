@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from ..settings import PADDLES
+from controller_backend.settings import PADDLES
 
 log = logging.getLogger("controller_backend.daemon.launcher")
 

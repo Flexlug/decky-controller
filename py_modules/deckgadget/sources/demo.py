@@ -6,9 +6,9 @@ import math
 import time
 from typing import Optional
 
-from .. import state as S
-from ..state import ControllerState
-from ..util.log import get_logger
+from deckgadget import state as S
+from deckgadget.state import ControllerState
+from deckgadget.util.log import get_logger
 
 log = get_logger("demo")
 

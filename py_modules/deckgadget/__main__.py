@@ -18,10 +18,10 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import __version__
-from . import config as C
-from .util.log import JsonEventSink, get_logger, setup_logging
-from .util.fs import read_text
+from deckgadget import __version__
+from deckgadget import config as C
+from deckgadget.util.fs import read_text
+from deckgadget.util.log import JsonEventSink, get_logger, setup_logging
 
 log = get_logger("cli")
 
@@ -79,10 +79,10 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
     from deckhw.neptune import find_neptune
     from deckhw.port import read_port_status
 
-    from .platform import guard
-    from .platform.display.backlight import Backlight
-    from .platform.display.compositor import GamescopeSleep, KscreenDpms
-    from .platform.display.touch import find_touchscreen
+    from deckgadget.platform import guard
+    from deckgadget.platform.display.backlight import Backlight
+    from deckgadget.platform.display.compositor import GamescopeSleep, KscreenDpms
+    from deckgadget.platform.display.touch import find_touchscreen
 
     out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": []}
     out["kernel"] = os.uname().release
@@ -136,7 +136,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_recover(args: argparse.Namespace) -> int:
-    from .platform import guard
+    from deckgadget.platform import guard
 
     setup_logging(logging.INFO, getattr(args, "log_file", None))
     try:
@@ -149,7 +149,7 @@ def cmd_recover(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
-    from .session import build_session
+    from deckgadget.session import build_session
 
     setup_logging(logging.DEBUG if args.verbose else logging.INFO, args.log_file)
     events = JsonEventSink(sys.stdout)
@@ -175,7 +175,7 @@ def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
-    from .sources.neptune.source import NeptuneUsbSource
+    from deckgadget.sources.neptune.source import NeptuneUsbSource
 
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
     if os.geteuid() != 0:
@@ -203,7 +203,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
 def _probe_capture(source, args: argparse.Namespace, stop: threading.Event) -> Tuple[int, int]:
     """Read raw reports until ``--seconds`` elapse or ``stop`` is set; print a line when the buttons change or
     every 0.5 s (every report with ``--all``). Returns (state reports, other packets)."""
-    from .sources.neptune.protocol import decode_report, parse_report
+    from deckgadget.sources.neptune.protocol import decode_report, parse_report
 
     deadline = time.monotonic() + args.seconds
     last_buttons: Optional[int] = None
@@ -233,7 +233,7 @@ def _probe_capture(source, args: argparse.Namespace, stop: threading.Event) -> T
 
 
 def _print_probe_report(raw: bytes, decoded: Dict[str, Any], state, changed: bool, args: argparse.Namespace) -> None:
-    from .state import button_names
+    from deckgadget.state import button_names
 
     if args.json:
         print(json.dumps({"raw": raw.hex(), "decoded": decoded, "canonical": state.as_dict() if state else None},

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, Protocol, runtime_checkable
 
-from ..state import ControllerState
+from deckgadget.state import ControllerState
 
 
 @runtime_checkable

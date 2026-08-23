@@ -2,7 +2,7 @@
 USB-PD contract from ``steamdeck_hwmon`` (a PC/hub port gives 5 V, a PD charger 15-20 V)."""
 from typing import Dict, Optional, Tuple
 
-from .sysfs import Sysfs
+from deckhw.sysfs import Sysfs
 
 AC_SUPPLY_NAME = "ACAD"
 STEAMDECK_HWMON_NAME = "steamdeck_hwmon"

@@ -2,7 +2,7 @@
 size field, so they must match the kernel exactly)."""
 from __future__ import annotations
 
-from ...util.ioctl import IO, IOR, IOW, IOWR
+from deckgadget.util.ioctl import IO, IOR, IOW, IOWR
 
 UDC_NAME_LENGTH_MAX = 128
 SZ_INIT = UDC_NAME_LENGTH_MAX * 2 + 1      # struct usb_raw_init {u8 driver[128]; u8 device[128]; u8 speed}

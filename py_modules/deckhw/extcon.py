@@ -3,7 +3,7 @@ peripheral is attached and the port is a host; otherwise it is a device."""
 import logging
 from typing import Dict
 
-from .sysfs import Sysfs
+from deckhw.sysfs import Sysfs
 
 log = logging.getLogger("deckhw.extcon")
 

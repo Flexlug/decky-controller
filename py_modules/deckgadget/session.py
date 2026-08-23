@@ -9,12 +9,12 @@ import threading
 import time
 from typing import Callable, Optional
 
-from . import state as S
-from .config import RunConfig
-from .profiles.base import Feedback, Profile
-from .sources.base import InputSource
-from .transports.base import Transport
-from .util.log import JsonEventSink, get_logger
+from deckgadget import state as S
+from deckgadget.config import RunConfig
+from deckgadget.profiles.base import Feedback, Profile
+from deckgadget.sources.base import InputSource
+from deckgadget.transports.base import Transport
+from deckgadget.util.log import JsonEventSink, get_logger
 
 log = get_logger("session")
 
@@ -260,20 +260,20 @@ class Session:
 def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sysfs: str = "/sys",
                   dev: str = "/dev") -> Session:
     """Wire real components according to ``config`` (``config.demo`` selects the demo source)."""
-    from .platform.display.controller import ScreenController
+    from deckgadget.platform.display.controller import ScreenController
     from deckhw.udc import Udc
-    from .profiles import make_profile
-    from .transports import make_transport
+    from deckgadget.profiles import make_profile
+    from deckgadget.transports import make_transport
 
     events = events or JsonEventSink()
     profile = make_profile(config.profile, paddles=config.paddles, forward_steam=config.forward_steam,
                            forward_qam=config.forward_qam)
     transport = make_transport(config.resolved_transport, udc=config.udc)
     if config.demo:
-        from .sources.demo import DemoSource
+        from deckgadget.sources.demo import DemoSource
         source: InputSource = DemoSource()
     else:
-        from .sources.neptune.source import NeptuneUsbSource
+        from deckgadget.sources.neptune.source import NeptuneUsbSource
         source = NeptuneUsbSource(sysfs=sysfs, dev=dev)
     screen = None
     if config.screen_off:

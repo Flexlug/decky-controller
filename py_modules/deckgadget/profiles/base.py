@@ -8,7 +8,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Protocol, runtime_checkable
 
-from ..state import ControllerState
+from deckgadget.state import ControllerState
 
 USB_DIR_IN = 0x80
 USB_TYPE_MASK = 0x60

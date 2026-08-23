@@ -9,14 +9,16 @@ from typing import List, Optional
 
 from deckhw.neptune import CONTROLLER_INTERFACE, NeptuneDevice, find_neptune
 
-from ...platform import neptune_binding
-from ...platform.usbfs import UsbfsDevice
-from ...state import ControllerState
-from ...util.log import get_logger
-from .commands import (FEATURE_WVALUE, HID_FEATURE_REPORT_BYTES, HID_REQ_GET_REPORT, HID_REQ_SET_REPORT,
-                       USB_REQTYPE_GET_CLASS_INTERFACE, USB_REQTYPE_SET_CLASS_INTERFACE, cmd_rumble,
-                       heartbeat_sequence, lizard_off_sequence)
-from .protocol import REPORT_LEN, parse_report
+from deckgadget.platform import neptune_binding
+from deckgadget.platform.usbfs import UsbfsDevice
+from deckgadget.sources.neptune.commands import (
+    FEATURE_WVALUE, HID_FEATURE_REPORT_BYTES, HID_REQ_GET_REPORT, HID_REQ_SET_REPORT,
+    USB_REQTYPE_GET_CLASS_INTERFACE, USB_REQTYPE_SET_CLASS_INTERFACE, cmd_rumble, heartbeat_sequence,
+    lizard_off_sequence,
+)
+from deckgadget.sources.neptune.protocol import REPORT_LEN, parse_report
+from deckgadget.state import ControllerState
+from deckgadget.util.log import get_logger
 
 log = get_logger("neptune_usb")
 
