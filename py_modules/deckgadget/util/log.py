@@ -71,8 +71,8 @@ class JsonEventSink:
     def error(self, message: str) -> None:
         self.emit("error", msg=message)
 
-    def metrics(self, hz: float, reports: int, dropped: int, **extra: Any) -> None:
-        self.emit("metrics", hz=round(hz, 1), reports=reports, dropped=dropped, **extra)
+    def metrics(self, hz: float, reports: int, dropped: int, out_reports: int = 0, **extra: Any) -> None:
+        self.emit("metrics", hz=round(hz, 1), reports=reports, dropped=dropped, out_reports=out_reports, **extra)
 
     def kill(self, reason: str) -> None:
         self.emit("kill", reason=reason)

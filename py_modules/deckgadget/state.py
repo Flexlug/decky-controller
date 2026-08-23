@@ -54,6 +54,11 @@ BUTTON_NAMES: Dict[int, str] = {
 BUTTON_BY_NAME: Dict[str, int] = {name: bit for bit, name in BUTTON_NAMES.items()}
 BUTTON_BY_NAME.update({"LB": BTN_L1, "RB": BTN_R1, "BACK": BTN_VIEW, "START": BTN_MENU, "GUIDE": BTN_STEAM})
 
+#: the back paddles by settings name, and the D-pad directions a paddle can be mapped to (both profiles use these)
+PADDLE_BITS: Dict[str, int] = {name: BUTTON_BY_NAME[name] for name in ("L4", "L5", "R4", "R5")}
+DPAD_BITS_BY_TARGET: Dict[str, int] = {name: BUTTON_BY_NAME[name]
+                                       for name in ("DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT")}
+
 
 def button_names(mask: int) -> list:
     """Names of all canonical bits set in ``mask`` (bit order)."""

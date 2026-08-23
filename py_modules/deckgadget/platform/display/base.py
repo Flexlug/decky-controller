@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, Optional
+from typing import Dict
 
 from deckgadget.util.log import get_logger
 
@@ -12,18 +12,14 @@ STATE_DIRS = ("/run/deckgadget", "/tmp/deckgadget")
 STATE_FILE_NAME = "brightness"
 
 
-def default_state_file(run_dir: Optional[str] = None) -> str:
-    """First writable state dir wins (``/run/deckgadget`` is created if possible)."""
-    candidates = (run_dir,) if run_dir else STATE_DIRS
-    for directory in candidates:
-        if not directory:
-            continue
-        try:
-            os.makedirs(directory, exist_ok=True)
-            if os.access(directory, os.W_OK):
-                return os.path.join(directory, STATE_FILE_NAME)
-        except OSError as exc:
-            log.debug("state dir %s not usable: %s", directory, exc)
+def default_state_file() -> str:
+    """The first state dir that is writable, or whose parent is (it is created on the first write — choosing the
+    path has no side effects, so status/diagnostics never create ``/run/deckgadget``)."""
+    for directory in STATE_DIRS:
+        probe = directory if os.path.isdir(directory) else os.path.dirname(directory)
+        if os.access(probe, os.W_OK):
+            return os.path.join(directory, STATE_FILE_NAME)
+    log.debug("no writable state dir among %s; using /tmp", STATE_DIRS)
     return os.path.join("/tmp", "deckgadget-" + STATE_FILE_NAME)
 
 

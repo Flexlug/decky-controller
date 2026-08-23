@@ -156,7 +156,7 @@ python3 -m deckgadget run    --profile xbox360|hid_gamepad --transport auto|raw|
                              [--screen-method auto|gamescope|kscreen|backlight] [--paddles L4=none,L5=none,R4=none,R5=none] \
                              [--forward-steam] [--forward-qam] [--udc NAME] [--log-file PATH] [-v]
 python3 -m deckgadget demo   … same flags; synthetic input source, no capture (transport test)
-python3 -m deckgadget status [--no-modprobe]    # JSON snapshot: drd/udc/extcon/cable/neptune/gadgets/screen methods
+python3 -m deckgadget status [--no-modprobe]    # JSON snapshot (deckhw.facts + gadgets + screen methods)
 python3 -m deckgadget recover [--log-file PATH] # idempotent full rollback, always exit 0, prints a JSON report
 python3 -m deckgadget probe  [--seconds 10] [--all] [--json] [--sensors]   # capture Neptune, print decoded reports, then roll back
 ```
@@ -170,7 +170,7 @@ paddles/log‑file from Settings (`--screen-method` is not passed: always `auto`
 ```
 {"ev":"state","state":"CAPTURING|GADGET_UP|WAITING_HOST|ACTIVE|STOPPING|STOPPED","detail":"…"}
 {"ev":"error","msg":"…"}
-{"ev":"metrics","hz":250,"reports":12345,"dropped":0}          # every 2 s
+{"ev":"metrics","hz":250,"reports":12345,"dropped":0,"out_reports":3}   # every 2 s
 {"ev":"kill","reason":"combo|unplug|signal|error"}
 {"ev":"screen","off":true,"method":"gamescope|kscreen|backlight|none"}
 ```

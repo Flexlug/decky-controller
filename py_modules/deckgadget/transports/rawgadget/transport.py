@@ -8,29 +8,26 @@ disable each handle once (EINVAL = already gone).
 """
 from __future__ import annotations
 
-import ctypes
 import errno
 import os
-import struct
 import subprocess
 import threading
 import time
 from typing import Optional
 
-from deckhw.udc import UDC_STATE_CONFIGURED, Udc, udc_names
+from deckhw.udc import UDC_STATE_CONFIGURED, Udc
 
 from deckgadget.platform.rawgadget.device import DEFAULT_DEVICE, RawGadgetDevice
 from deckgadget.platform.rawgadget.ioctls import (
-    EVENT_NAMES, SZ_EP_IO, USB_RAW_EVENT_CONNECT, USB_RAW_EVENT_CONTROL, USB_RAW_EVENT_DISCONNECT,
-    USB_RAW_EVENT_RESET, USB_RAW_EVENT_RESUME, USB_RAW_EVENT_SUSPEND, USB_RAW_IOCTL_EP_WRITE, USB_SPEED,
+    EVENT_NAMES, USB_RAW_EVENT_CONNECT, USB_RAW_EVENT_CONTROL, USB_RAW_EVENT_DISCONNECT, USB_RAW_EVENT_RESET,
+    USB_RAW_EVENT_RESUME, USB_RAW_EVENT_SUSPEND, USB_SPEED,
 )
 from deckgadget.profiles.base import GadgetDescriptors, Profile
-from deckgadget.util.ioctl import ioctl
-from deckgadget.util.log import get_logger
 from deckgadget.transports.base import (
-    FeedbackCallback, ReportSlot, TransportError, TransportMetrics, install_cancel_signal_handler,
-    join_with_interrupts,
+    FeedbackCallback, ReportSlot, TransportError, TransportMetrics, dispatch_output_report,
+    install_cancel_signal_handler, join_with_interrupts,
 )
+from deckgadget.util.log import get_logger
 from deckgadget.transports.rawgadget.control import ControlHandler
 
 log = get_logger("raw_gadget")
@@ -103,15 +100,13 @@ class UsbRawGadgetTransport:
             subprocess.run(["modprobe", "raw_gadget"], check=False, capture_output=True)
         if not os.path.exists(self.dev_path):
             raise TransportError(f"{self.dev_path} missing (modprobe raw_gadget failed?)")
-        udc = self.udc
+        udc_watch = Udc(self.sysfs, self.udc)
+        udc = udc_watch.resolve()
         if udc is None:
-            available = udc_names(self.sysfs)
-            if not available:
-                raise TransportError("no UDC in /sys/class/udc: DRD disabled in BIOS, or Deck is USB host (dock attached?)")
-            udc = available[0]
+            raise TransportError("no UDC in /sys/class/udc: DRD disabled in BIOS, or Deck is USB host (dock attached?)")
         self.udc = udc
-        self._udc_watch = Udc(self.sysfs, udc)
-        bound_function = self._udc_watch.function()
+        self._udc_watch = udc_watch
+        bound_function = udc_watch.function()
         if bound_function:
             log.warning("UDC %s already has function %r bound (stale gadget?) — trying anyway", udc, bound_function)
         try:
@@ -291,20 +286,14 @@ class UsbRawGadgetTransport:
         assert device is not None
         descriptors = self.descriptors
         max_packet = descriptors.ep_in_max_packet if descriptors else 64
-        buffer = ctypes.create_string_buffer(SZ_EP_IO + max_packet)
-        payload_address = ctypes.addressof(buffer) + SZ_EP_IO
         slot = self._slot
-        fd = device.fd
         sent = 0
         while self._configured and not self._stop.is_set() and self.generation == generation:
             report = slot.take(0.25)
             if report is None:
                 continue
-            length = min(len(report), max_packet)
-            struct.pack_into("<HHI", buffer, 0, handle, 0, length)
-            ctypes.memmove(payload_address, report, length)
             try:
-                ioctl(fd, USB_RAW_IOCTL_EP_WRITE, buffer)
+                device.ep_write(handle, report[:max_packet])
                 sent += 1
                 self._metrics.sent += 1
             except OSError as exc:
@@ -335,20 +324,6 @@ class UsbRawGadgetTransport:
                 else:
                     log.debug("OUT read ended: %s", exc)
                 break
-            if not data or profile is None:
-                continue
-            self._metrics.out_reports += 1
-            try:
-                feedback = profile.on_output(data)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("on_output failed: %s", exc)
-                continue
-            if feedback is None:
-                continue
-            log.debug("host -> %s: %s", feedback.kind, data.hex())
-            if self.on_feedback is not None:
-                try:
-                    self.on_feedback(feedback)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("feedback callback failed: %s", exc)
+            if data and profile is not None:
+                dispatch_output_report(profile, data, self.on_feedback, self._metrics)
         log.debug("OUT loop ended")

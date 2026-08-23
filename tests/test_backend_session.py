@@ -58,6 +58,12 @@ class SessionViewTest(unittest.TestCase):
         self.assertIsNone(error.toast)
         self.assertEqual(self.view.last_kill, "error")
 
+    def test_unknown_kill_reason_is_logged_and_not_toasted(self):
+        with self.assertLogs("controller_backend.session", level="WARNING"):
+            outcome = self.view.apply({"ev": "kill", "reason": "meteor"})
+        self.assertIsNone(outcome.toast)
+        self.assertEqual(self.view.last_kill, "meteor")
+
     def test_signal_kill_toasts_only_when_not_requested(self):
         self.assertIsNone(self.view.apply({"ev": "kill", "reason": "signal"}, stop_requested=True).toast)
         self.assertIsNotNone(self.view.apply({"ev": "kill", "reason": "signal"}, stop_requested=False).toast)

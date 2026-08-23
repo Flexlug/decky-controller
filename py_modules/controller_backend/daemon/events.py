@@ -11,6 +11,7 @@ log = logging.getLogger("controller_backend.daemon.events")
 JsonDict = dict[str, Any]
 
 EVENT_NAMES = ("state", "error", "metrics", "kill", "screen")
+KILL_COMBO, KILL_UNPLUG, KILL_SIGNAL, KILL_ERROR = KILL_REASONS = ("combo", "unplug", "signal", "error")
 SESSION_STATES = ("IDLE", "CAPTURING", "GADGET_UP", "WAITING_HOST", "ACTIVE", "STOPPING")
 CAPTURED_STATES = frozenset({"CAPTURING", "GADGET_UP", "WAITING_HOST", "ACTIVE"})
 DAEMON_STOPPED_STATE = "STOPPED"   # the daemon's last state; the backend shows STOPPING until the process is gone

@@ -14,9 +14,8 @@ PY_MODULES_DIR = os.path.join(decky.DECKY_PLUGIN_DIR, "py_modules")
 if PY_MODULES_DIR not in sys.path:
     sys.path.insert(0, PY_MODULES_DIR)
 
+from controller_backend.daemon.events import JsonDict  # noqa: E402
 from controller_backend.service import Service  # noqa: E402
-
-JsonDict = dict[str, Any]
 
 
 def _plugin_version() -> str:

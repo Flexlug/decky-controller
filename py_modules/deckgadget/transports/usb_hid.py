@@ -14,10 +14,12 @@ from typing import Optional
 
 from deckgadget.platform import guard
 from deckgadget.profiles.base import HidFunction, Profile
-from deckgadget.transports.base import FeedbackCallback, ReportSlot, TransportError, TransportMetrics
+from deckgadget.transports.base import (
+    FeedbackCallback, ReportSlot, TransportError, TransportMetrics, dispatch_output_report,
+)
 from deckgadget.util.fs import write_bytes, write_text
 from deckgadget.util.log import get_logger
-from deckhw.udc import Udc, udc_names
+from deckhw.udc import Udc
 
 log = get_logger("usb_hid")
 
@@ -72,11 +74,12 @@ class UsbHidTransport:
             raise TransportError(f"profile {profile.name!r} is not a plain HID device; use transport=raw")
         self.profile, self.hid, self.on_feedback = profile, hid, on_feedback
         self._ensure_configfs()
-        udc = self.udc or (udc_names(self.sysfs) or [None])[0]
-        if not udc:
+        udc_watch = Udc(self.sysfs, self.udc)
+        udc = udc_watch.resolve()
+        if udc is None:
             raise TransportError("no UDC in /sys/class/udc: DRD disabled in BIOS, or Deck is USB host (dock attached?)")
         self.udc = udc
-        self._udc_watch = Udc(self.sysfs, udc)
+        self._udc_watch = udc_watch
         if os.path.isdir(self.gadget_dir):
             log.warning("stale gadget %s found; removing", self.gadget_dir)
             guard.remove_configfs_gadget(self.gadget_dir)
@@ -238,16 +241,5 @@ class UsbHidTransport:
                     continue
                 log.debug("hidg read ended: %s", exc)
                 break
-            if not data or profile is None:
-                continue
-            self._metrics.out_reports += 1
-            try:
-                feedback = profile.on_output(data)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("on_output failed: %s", exc)
-                continue
-            if feedback is not None and self.on_feedback is not None:
-                try:
-                    self.on_feedback(feedback)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("feedback callback failed: %s", exc)
+            if data and profile is not None:
+                dispatch_output_report(profile, data, self.on_feedback, self._metrics)

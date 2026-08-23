@@ -1,7 +1,7 @@
 """Session state machine: IDLE -> CAPTURING -> GADGET_UP -> WAITING_HOST -> ACTIVE -> STOPPING -> STOPPED.
 
-The kill combo is armed from CAPTURING on and never forwarded; unplug = UDC leaves ``configured`` for
-longer than ``unplug_grace_s``; teardown always runs in ``finally`` with every step guarded.
+The kill combo is armed once the read loop runs and is never forwarded; unplug = the transport reports the
+host gone for longer than ``unplug_grace_s``; teardown always runs in ``finally`` with every step guarded.
 """
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import threading
 import time
 from typing import Callable, Optional
 
-from deckgadget import state as S
 from deckgadget.config import RunConfig
 from deckgadget.profiles.base import Feedback, Profile
 from deckgadget.sources.base import InputSource
@@ -30,6 +29,7 @@ KILL_COMBO = "combo"
 KILL_UNPLUG = "unplug"
 KILL_SIGNAL = "signal"
 KILL_ERROR = "error"
+KILL_REASONS = (KILL_COMBO, KILL_UNPLUG, KILL_SIGNAL, KILL_ERROR)   # values of the ``kill`` event (contract)
 
 
 class HoldDetector:
@@ -66,8 +66,6 @@ class HoldDetector:
 class ScreenLike:
     """Minimal interface the session needs from ``platform.display.controller.ScreenController``."""
 
-    is_off: bool = False
-
     def activate(self) -> None: ...
 
     def deactivate(self) -> None: ...
@@ -75,38 +73,30 @@ class ScreenLike:
 
 class Session:
     def __init__(self, config: RunConfig, source: InputSource, profile: Profile, transport: Transport,
-                 screen: Optional[ScreenLike] = None, udc_state: Optional[Callable[[], Optional[str]]] = None,
-                 events: Optional[JsonEventSink] = None, clock: Callable[[], float] = time.monotonic,
-                 read_timeout: float = 0.05, unplug_grace_s: float = 1.0, metrics_interval: float = 2.0,
-                 udc_poll_interval: float = 0.1, forward_rumble: bool = False) -> None:
+                 screen: Optional[ScreenLike] = None, events: Optional[JsonEventSink] = None,
+                 clock: Callable[[], float] = time.monotonic, read_timeout: float = 0.05,
+                 unplug_grace_s: float = 1.0, metrics_interval: float = 2.0,
+                 udc_poll_interval: float = 0.1) -> None:
         self.config = config
         self.source = source
         self.profile = profile
         self.transport = transport
         self.screen = screen
-        self.udc_state = udc_state
         self.events = events or JsonEventSink()
         self.clock = clock
         self.read_timeout = read_timeout
         self.unplug_grace_s = unplug_grace_s
         self.metrics_interval = metrics_interval
         self.udc_poll_interval = udc_poll_interval
-        self.forward_rumble = forward_rumble
         self.state = IDLE
         self.kill_reason: Optional[str] = None
         self.error: Optional[BaseException] = None
         self.reports = 0
-        self.reports_sent = 0
+        self.last_feedback: Optional[Feedback] = None
         self._stop = threading.Event()
         self._combo = HoldDetector(config.kill_mask, config.kill_hold_s)
         self._source_open = False
-        self._transport_started = False
         self._lock = threading.Lock()
-        self.last_feedback: Optional[Feedback] = None
-
-    @property
-    def stopping(self) -> bool:
-        return self._stop.is_set()
 
     def request_stop(self, reason: str = KILL_SIGNAL) -> None:
         """Thread/signal-safe; the first reason wins."""
@@ -133,14 +123,11 @@ class Session:
                 return 0
             self._set_state(GADGET_UP, f"transport={self.transport.name} profile={self.profile.name}")
             self.transport.start(self.profile, on_feedback=self._on_feedback)
-            self._transport_started = True
             self._set_state(WAITING_HOST, "waiting for UDC state=configured")
             self._loop()
         except Exception as exc:  # noqa: BLE001
             self.error = exc
-            with self._lock:
-                if self.kill_reason is None:
-                    self.kill_reason = KILL_ERROR
+            self.request_stop(KILL_ERROR)
             log.exception("session failed: %s", exc)
             self.events.error(f"{type(exc).__name__}: {exc}")
             exit_code = 1
@@ -153,33 +140,18 @@ class Session:
         log.info("state %s %s", state, detail)
         self.events.state(state, detail)
 
-    def _kill(self, reason: str) -> None:
-        with self._lock:
-            if self.kill_reason is None:
-                self.kill_reason = reason
-        self._stop.set()
-
     def _on_feedback(self, feedback: Feedback) -> None:
+        """Host output reports (rumble, LED) are only observed; nothing is forwarded to the controller."""
+        previous = self.last_feedback
         self.last_feedback = feedback
+        if previous is None or previous.kind != feedback.kind:
+            log.info("host output: %s", feedback.kind)
         if feedback.kind == "rumble":
-            log.info("host rumble left=%d right=%d", feedback.left, feedback.right)
-            if self.forward_rumble:
-                try:
-                    self.source.rumble(feedback.left, feedback.right)
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("rumble forward failed: %s", exc)
+            log.debug("host rumble left=%d right=%d", feedback.left, feedback.right)
         elif feedback.kind == "led":
-            log.info("host LED pattern 0x%02x", feedback.value)
+            log.debug("host LED pattern 0x%02x", feedback.value)
         else:
-            log.info("host output report: %s", feedback.raw.hex())
-
-    def _host_connected(self) -> bool:
-        if self.udc_state is not None:
-            udc_state = self.udc_state()
-            if udc_state is not None:
-                # sysfs is the authority (raw-gadget may lag on DISCONNECT), the transport must agree
-                return udc_state == "configured" and self.transport.connected()
-        return self.transport.connected()
+            log.debug("host output report: %s", feedback.raw.hex())
 
     def _loop(self) -> None:
         clock = self.clock
@@ -199,7 +171,7 @@ class Session:
                 window_reports += 1
                 if combo.feed(controller_state.buttons, now):
                     log.info("kill combo held for %.1fs", combo.hold_s)
-                    self._kill(KILL_COMBO)
+                    self.request_stop(KILL_COMBO)
                     break
                 if combo.engaged:
                     controller_state.buttons &= ~mask   # the kill combo is never forwarded to the host
@@ -208,7 +180,7 @@ class Session:
                 transport_error = self.transport.error
                 if transport_error is not None:
                     raise RuntimeError(f"transport failed: {transport_error}")
-                connected = self._host_connected()
+                connected = self.transport.connected()
                 if self.state == WAITING_HOST:
                     if connected:
                         self._set_state(ACTIVE, "host configured")
@@ -220,17 +192,17 @@ class Session:
                         disconnected_since = now
                     elif now - disconnected_since >= self.unplug_grace_s:
                         log.info("host gone for %.1fs -> unplug", now - disconnected_since)
-                        self._kill(KILL_UNPLUG)
+                        self.request_stop(KILL_UNPLUG)
                         break
             if controller_state is not None and self.state == ACTIVE:
                 self.transport.send(self.profile.pack(controller_state))
-                self.reports_sent += 1
             if now >= next_metrics:
                 elapsed = max(1e-6, now - window_start)
                 transport_metrics = self.transport.metrics()
                 self.events.metrics(hz=window_reports / elapsed, reports=self.reports,
                                     dropped=transport_metrics.dropped, sent=transport_metrics.sent,
-                                    errors=transport_metrics.errors, state=self.state)
+                                    errors=transport_metrics.errors, out_reports=transport_metrics.out_reports,
+                                    state=self.state)
                 window_start, window_reports = now, 0
                 next_metrics = now + self.metrics_interval
 
@@ -244,7 +216,6 @@ class Session:
             self.transport.stop()
         except Exception as exc:  # noqa: BLE001
             log.warning("transport stop failed: %s", exc)
-        self._transport_started = False
         if self._source_open:
             try:
                 self.source.close()
@@ -263,7 +234,6 @@ def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sys
                   dev: str = "/dev") -> Session:
     """Wire real components according to ``config`` (``config.demo`` selects the demo source)."""
     from deckgadget.platform.display.controller import ScreenController
-    from deckhw.udc import Udc
     from deckgadget.profiles import make_profile
     from deckgadget.transports import make_transport
 
@@ -282,5 +252,4 @@ def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sys
         screen = ScreenController(wake_seconds=config.touch_wake_seconds, sysfs=sysfs, dev=dev,
                                   method=config.screen_method,
                                   on_change=lambda off, method: events.screen(off, method))
-    watcher = Udc(sysfs, config.udc)
-    return Session(config, source, profile, transport, screen=screen, udc_state=watcher.state, events=events)
+    return Session(config, source, profile, transport, screen=screen, events=events)

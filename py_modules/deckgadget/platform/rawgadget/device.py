@@ -31,6 +31,7 @@ class RawGadgetDevice:
     def __init__(self, path: str = DEFAULT_DEVICE) -> None:
         self.path = path
         self.fd = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+        self._write_buffer = ctypes.create_string_buffer(SZ_EP_IO)
 
     def close(self) -> None:
         """Closing the fd unregisters the gadget driver; the UDC drops off the bus."""
@@ -76,7 +77,13 @@ class RawGadgetDevice:
         ioctl(self.fd, USB_RAW_IOCTL_EP_DISABLE, int(handle))
 
     def ep_write(self, handle: int, data: bytes) -> int:
-        return self._ep_io(USB_RAW_IOCTL_EP_WRITE, handle, data)[0]
+        """Hot path of the IN worker: one reusable ``usb_raw_ep_io`` buffer, grown only when a report is larger."""
+        length = len(data)
+        if len(self._write_buffer) < SZ_EP_IO + length:
+            self._write_buffer = ctypes.create_string_buffer(SZ_EP_IO + length)
+        struct.pack_into("<HHI", self._write_buffer, 0, handle, 0, length)
+        ctypes.memmove(ctypes.addressof(self._write_buffer) + SZ_EP_IO, data, length)
+        return ioctl(self.fd, USB_RAW_IOCTL_EP_WRITE, self._write_buffer)
 
     def ep_read(self, handle: int, length: int) -> bytes:
         return self._ep_io(USB_RAW_IOCTL_EP_READ, handle, b"", length)[1]

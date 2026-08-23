@@ -7,13 +7,14 @@ import os
 from typing import Dict, Optional
 
 from deckgadget.platform.display.base import ScreenMethod, default_state_file
-from deckgadget.util.fs import read_text, write_text
+from deckgadget.util.fs import write_text
 from deckgadget.util.log import get_logger
 from deckhw.sysfs import Sysfs
 
 log = get_logger("screen")
 
-BACKLIGHT_DIR = "/sys/class/backlight/amdgpu_bl0"
+BACKLIGHT_NAME = "amdgpu_bl0"
+BACKLIGHT_DIR = os.path.join("/sys", "class", "backlight", BACKLIGHT_NAME)
 
 
 class Backlight:
@@ -42,7 +43,7 @@ class Backlight:
         """Value remembered in memory or in the state file (``None`` when nothing saved)."""
         if self._saved is not None:
             return self._saved
-        text = read_text(self.state_file)
+        text = Sysfs(os.path.dirname(self.state_file)).text(os.path.basename(self.state_file))
         try:
             return int(text) if text else None
         except ValueError:
@@ -58,7 +59,7 @@ class Backlight:
         current = self.brightness()
         previously_saved = self.saved_value()
         # Keep an earlier saved value if the current one is 0 (e.g. we crashed mid-session).
-        value = current if current and current > 0 else (previously_saved if previously_saved else self._safe_value(None))
+        value = current if current and current > 0 else self._safe_value(previously_saved)
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
             write_text(self.state_file, str(value))

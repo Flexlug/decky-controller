@@ -7,6 +7,8 @@ import _path  # noqa: F401
 from deckgadget import config as C
 from deckgadget import state as S
 from deckgadget.__main__ import build_parser, config_from_args
+from deckgadget.platform.display.backlight import Backlight
+from deckgadget.platform.display.controller import AUTO_METHOD, ScreenController
 
 
 class ConfigTest(unittest.TestCase):
@@ -65,6 +67,12 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(C.RunConfig(screen_method="Gamescope").screen_method, "gamescope")
         with self.assertRaises(C.ConfigError):
             C.RunConfig(screen_method="dpms")
+
+    def test_screen_methods_match_the_controller_strategies(self):
+        controller = ScreenController(backlight=Backlight("/nonexistent"), touch_event="")
+        self.assertEqual(C.SCREEN_METHODS, (AUTO_METHOD, *(strategy.name for strategy in controller.strategies)))
+        with self.assertRaises(ValueError):
+            ScreenController(backlight=Backlight("/nonexistent"), touch_event="", method="dpms")
 
     def test_cli_parser_to_config(self):
         ap = build_parser()

@@ -103,7 +103,7 @@ def remove_configfs_gadget(gadget_dir: str) -> Report:
 
 
 def _remove_gadgets(configfs: str, prefix: str, report: Report) -> None:
-    """Step 1: every configfs gadget of ours. raw-gadget needs nothing here: it dies with the daemon's fd."""
+    """Every configfs gadget of ours. raw-gadget needs nothing here: it dies with the daemon's fd."""
     for gadget_dir in list_gadgets(configfs, prefix):
         try:
             gadget_report = remove_configfs_gadget(gadget_dir)
@@ -116,7 +116,7 @@ def _remove_gadgets(configfs: str, prefix: str, report: Report) -> None:
 
 
 def _rebind_neptune(sysfs: str, dev: str, report: Report) -> None:
-    """Step 2: interfaces back on usbhid. Re-scans instead of trusting the writes: bind/drivers_probe probe
+    """Interfaces back on usbhid. Re-scans instead of trusting the writes: bind/drivers_probe probe
     synchronously, so the scan is authoritative, and a silently ignored bind would otherwise leave the Deck
     without its controller."""
     errors: List[str] = report["errors"]  # type: ignore[assignment]
@@ -144,7 +144,7 @@ def _rebind_neptune(sysfs: str, dev: str, report: Report) -> None:
 
 
 def _wake_display(gamescope: Optional[ScreenMethod], kscreen: Optional[ScreenMethod], report: Report) -> None:
-    """Step 3: a crashed session must never leave the panel asleep. Per compositor: ``available`` and, when it
+    """A crashed session must never leave the panel asleep. Per compositor: ``available`` and, when it
     was reachable, ``woken``; failures are warnings, never errors."""
     warnings: List[str] = report["warnings"]  # type: ignore[assignment]
     display: Report = {}
@@ -170,7 +170,7 @@ def _wake_display(gamescope: Optional[ScreenMethod], kscreen: Optional[ScreenMet
 
 
 def _restore_backlight(backlight_dir: str, state_file: Optional[str], report: Report) -> None:
-    """Step 4: the brightness a crashed backlight session saved, if any."""
+    """The brightness a crashed backlight session saved, if any."""
     try:
         backlight = Backlight(backlight_dir, state_file or default_state_file())
         restored = backlight.restore(forget=True)

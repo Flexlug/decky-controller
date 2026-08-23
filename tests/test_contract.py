@@ -187,6 +187,16 @@ class TransportResolutionTest(unittest.TestCase):
                     self.assertEqual(backend_settings.resolve_transport(profile, transport), expected, f"{profile}/{transport}")
 
 
+class KillReasonTest(unittest.TestCase):
+    def test_backend_mirrors_the_daemon_kill_reasons(self):
+        self.assertEqual(events.KILL_REASONS, session.KILL_REASONS)
+
+    def test_daemon_only_emits_known_kill_reasons(self):
+        source = inspect.getsource(session)
+        emitted = set(re.findall(r"request_stop\((KILL_\w+)\)", source)) | {"KILL_SIGNAL"}   # the default argument
+        self.assertEqual({getattr(session, name) for name in emitted}, set(session.KILL_REASONS))
+
+
 class SessionStateTest(BackendHarness):
     def test_session_states_agree(self):
         self.assertEqual(list(events.SESSION_STATES), ts_union("SessionState"))

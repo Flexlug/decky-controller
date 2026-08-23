@@ -4,14 +4,14 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Any, Optional
+from typing import Optional
 
+from controller_backend.daemon.events import JsonDict
 from controller_backend.daemon.launcher import DaemonPaths, PYTHON_BIN
 from controller_backend.daemon.supervisor import DaemonSupervisor
 
 log = logging.getLogger("controller_backend.diagnostics")
 
-JsonDict = dict[str, Any]
 LOG_TAIL_LINES = 50
 
 

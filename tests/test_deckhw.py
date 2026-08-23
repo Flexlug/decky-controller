@@ -150,11 +150,21 @@ class CollectStatusTest(unittest.TestCase):
         root = tempfile.mkdtemp(prefix="deckhw_cli_")
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         fs = port_tree(root, acad_online=1, pd_mv=15000, pd_ma=3000)
-        out = collect_status(fs.sys, fs.dev, use_modprobe=False)
+        fs.add_backlight(brightness=90)
+        fs.add_gadget("deckctl_hid")
+        state_file = os.path.join(root, "run", "deckgadget", "brightness")
+        out = collect_status(fs.sys, fs.dev, use_modprobe=False, configfs=fs.configfs,
+                             run_user_base=os.path.join(root, "run", "user"), state_file=state_file)
         self.assertEqual((out["cable_kind"], out["cable_power"], out["pd_contract_mv"], out["pd_contract_ma"]),
                          ("charger", True, 15000, 3000))
         self.assertFalse(out["host_connected"])
         self.assertEqual(out["udc_state"], "not attached")
+        self.assertEqual(out["gadgets"], [os.path.join(fs.configfs, "usb_gadget", "deckctl_hid")])
+        self.assertEqual((out["backlight"]["available"], out["backlight"]["brightness"], out["backlight"]["state_file"]),
+                         (True, 90, state_file))
+        self.assertEqual(out["screen_methods"], {"gamescope": False, "kscreen": False, "backlight": True})
+        self.assertFalse(os.path.exists(os.path.dirname(state_file)))   # status never creates the state dir
+        self.assertTrue(out["ok"], out["errors"])
 
 
 class SysfsReaderTest(unittest.TestCase):

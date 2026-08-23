@@ -3,6 +3,7 @@ import unittest
 
 import _path  # noqa: F401
 
+from deckgadget import config
 from deckgadget import state as S
 from deckgadget.profiles import make_profile
 from deckgadget.profiles import xbox360 as X
@@ -172,6 +173,14 @@ class FactoryTest(unittest.TestCase):
         self.assertEqual(make_profile("hid_gamepad", paddles={"L4": "A"}).name, "hid_gamepad")
         with self.assertRaises(ValueError):
             make_profile("nope")
+
+    def test_every_profile_accepts_every_paddle_target(self):
+        for profile_name in config.PROFILES:
+            for paddle in config.PADDLE_NAMES:
+                for target in config.PADDLE_TARGETS:
+                    profile = make_profile(profile_name, paddles={paddle: target})
+                    report = profile.pack(ControllerState(buttons=S.PADDLE_BITS[paddle]))
+                    self.assertEqual(len(report), profile.report_length, f"{profile_name} {paddle}={target}")
 
 
 if __name__ == "__main__":

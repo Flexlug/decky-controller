@@ -5,7 +5,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from controller_backend.daemon.events import DAEMON_STOPPED_STATE, JsonDict, SESSION_STATES
+from controller_backend.daemon.events import (
+    DAEMON_STOPPED_STATE, KILL_COMBO, KILL_REASONS, KILL_SIGNAL, KILL_UNPLUG, JsonDict, SESSION_STATES,
+)
 
 log = logging.getLogger("controller_backend.session")
 
@@ -93,11 +95,14 @@ class SessionView:
     def _apply_kill(self, event: JsonDict, stop_requested: bool) -> EventOutcome:
         reason = str(event.get("reason") or "unknown")
         self.last_kill = reason
+        if reason not in KILL_REASONS:
+            log.warning("[deckgadget] kill with unknown reason %r", reason)
+            return EventOutcome()
         log.info("[deckgadget] kill reason=%s", reason)
-        if reason == "combo":
+        if reason == KILL_COMBO:
             return EventOutcome(toast=Toast("Controller mode stopped", "Exit combo held — the Deck is a Deck again."))
-        if reason == "unplug":
+        if reason == KILL_UNPLUG:
             return EventOutcome(toast=Toast("Controller mode stopped", "USB cable disconnected."))
-        if reason == "signal" and not stop_requested:
+        if reason == KILL_SIGNAL and not stop_requested:
             return EventOutcome(toast=Toast("Controller mode stopped", "Daemon was signalled to exit."))
-        return EventOutcome()   # "error": the exit handler reports it together with the error text
+        return EventOutcome()   # error: the exit handler reports it together with the error text

@@ -114,6 +114,10 @@ class FakeRawGadgetDevice:
     def ep_disable(self, handle):
         self._record("ep_disable", handle)
 
+    def ep_write(self, handle, data):
+        self._record("ep_write", self.fd, handle, bytes(data))
+        return len(data)
+
     def ep_read(self, handle, length):
         try:
             return self.out_packets.get(timeout=self.IDLE_TIMEOUT)
@@ -151,19 +155,6 @@ def collecting_callback(expected):
     return Collector(), seen
 
 
-def fake_ep_write_ioctl(device):
-    """Stand-in for the module-level ``ioctl`` used by the IN writer: decodes ``struct usb_raw_ep_io``."""
-
-    def fake_ioctl(fd, request, arg=0):
-        if request != IOC.USB_RAW_IOCTL_EP_WRITE:
-            raise AssertionError(f"unexpected ioctl 0x{request:x}")
-        handle, _flags, length = struct.unpack_from("<HHI", arg.raw, 0)
-        device._record("ep_write", fd, handle, bytes(arg.raw[IOC.SZ_EP_IO:IOC.SZ_EP_IO + length]))
-        return length
-
-    return fake_ioctl
-
-
 class ReportSlotTest(unittest.TestCase):
     def test_newest_wins_and_drops_are_counted(self):
         slot = B.ReportSlot()
@@ -196,9 +187,6 @@ class ControlHandlingTest(unittest.TestCase):
     def setUp(self):
         B.install_cancel_signal_handler()
         self.device = FakeRawGadgetDevice()
-        patcher = mock.patch.object(R, "ioctl", fake_ep_write_ioctl(self.device))
-        patcher.start()
-        self.addCleanup(patcher.stop)
         self.transport = None
 
     def tearDown(self):
@@ -346,7 +334,7 @@ class ControlHandlingTest(unittest.TestCase):
 
 
 class LifecycleTest(unittest.TestCase):
-    """``start`` / event loop / ``stop`` with the device class and the IN-writer ioctl replaced."""
+    """``start`` / event loop / ``stop`` with the device class replaced by the fake."""
 
     def setUp(self):
         B.install_cancel_signal_handler()
@@ -358,10 +346,9 @@ class LifecycleTest(unittest.TestCase):
         self.dev_path = os.path.join(self.tmp, "raw-gadget")
         open(self.dev_path, "w").close()
         self.device = FakeRawGadgetDevice()
-        for patcher in (mock.patch.object(R, "RawGadgetDevice", lambda path: self.device),
-                        mock.patch.object(R, "ioctl", fake_ep_write_ioctl(self.device))):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(R, "RawGadgetDevice", lambda path: self.device)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.transport = None
 
     def tearDown(self):

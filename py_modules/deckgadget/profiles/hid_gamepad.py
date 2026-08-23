@@ -72,8 +72,7 @@ _HAT_TABLE = {
 }
 
 # 1-based HID button numbers
-(HB_A, HB_B, HB_X, HB_Y, HB_L1, HB_R1, HB_L3, HB_R3, HB_VIEW, HB_MENU, HB_STEAM, HB_QAM,
- HB_L4, HB_L5, HB_R4, HB_R5) = range(1, 17)
+(HB_A, HB_B, HB_X, HB_Y, HB_L1, HB_R1, HB_L3, HB_R3, HB_VIEW, HB_MENU, HB_STEAM, HB_QAM) = range(1, 13)
 
 
 def _hid_button_bit(number: int) -> int:
@@ -89,9 +88,6 @@ DEFAULT_BUTTON_MAP = (
     (S.BTN_L1, _hid_button_bit(HB_L1)), (S.BTN_R1, _hid_button_bit(HB_R1)), (S.BTN_L3, _hid_button_bit(HB_L3)), (S.BTN_R3, _hid_button_bit(HB_R3)),
     (S.BTN_VIEW, _hid_button_bit(HB_VIEW)), (S.BTN_MENU, _hid_button_bit(HB_MENU)),
 )
-PADDLE_BITS = {"L4": S.BTN_L4, "L5": S.BTN_L5, "R4": S.BTN_R4, "R5": S.BTN_R5}
-DPAD_TARGETS = {"DPAD_UP": S.BTN_DPAD_UP, "DPAD_DOWN": S.BTN_DPAD_DOWN,
-                "DPAD_LEFT": S.BTN_DPAD_LEFT, "DPAD_RIGHT": S.BTN_DPAD_RIGHT}
 
 _REPORT = struct.Struct("<bbbbbbBH")
 
@@ -151,9 +147,9 @@ class HidGamepadProfile:
             if target == "NONE":
                 continue
             elif target in HB_BY_TARGET:
-                table.append((PADDLE_BITS[paddle.upper()], HB_BY_TARGET[target]))
-            elif target in DPAD_TARGETS:
-                dpad_extra.append((PADDLE_BITS[paddle.upper()], DPAD_TARGETS[target]))
+                table.append((S.PADDLE_BITS[paddle.upper()], HB_BY_TARGET[target]))
+            elif target in S.DPAD_BITS_BY_TARGET:
+                dpad_extra.append((S.PADDLE_BITS[paddle.upper()], S.DPAD_BITS_BY_TARGET[target]))
             else:
                 raise ValueError(f"unknown paddle target {target!r}")
         self._table = tuple(table)

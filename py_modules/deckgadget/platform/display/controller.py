@@ -6,7 +6,6 @@ from __future__ import annotations
 import threading
 from typing import Callable, List, Optional
 
-from deckgadget.config import DEFAULT_SCREEN_METHOD, SCREEN_METHODS
 from deckgadget.platform.display.backlight import Backlight, BacklightDim
 from deckgadget.platform.display.base import ScreenMethod
 from deckgadget.platform.display.compositor import GamescopeSleep, KscreenDpms
@@ -15,6 +14,8 @@ from deckgadget.util.log import get_logger
 
 log = get_logger("screen")
 
+AUTO_METHOD = "auto"
+
 
 class ScreenController:
     """``on_change(off, method)`` fires on every effective change, plus once with ``(False, "none")`` at
@@ -22,14 +23,16 @@ class ScreenController:
 
     def __init__(self, backlight: Optional[Backlight] = None, touch_event: Optional[str] = None,
                  wake_seconds: float = 5.0, on_change: Optional[Callable[[bool, str], None]] = None,
-                 sysfs: str = "/sys", dev: str = "/dev", method: str = DEFAULT_SCREEN_METHOD,
+                 sysfs: str = "/sys", dev: str = "/dev", method: str = AUTO_METHOD,
                  gamescope: Optional[ScreenMethod] = None, kscreen: Optional[ScreenMethod] = None) -> None:
-        if method not in SCREEN_METHODS:
-            raise ValueError(f"unknown screen method {method!r} (expected one of {SCREEN_METHODS})")
         self.backlight = backlight or Backlight()
         self.gamescope: ScreenMethod = gamescope if gamescope is not None else GamescopeSleep()
         self.kscreen: ScreenMethod = kscreen if kscreen is not None else KscreenDpms()
         self.backlight_method: ScreenMethod = BacklightDim(self.backlight)
+        self.strategies = (self.gamescope, self.kscreen, self.backlight_method)   # auto tries them in this order
+        known = (AUTO_METHOD, *(strategy.name for strategy in self.strategies))
+        if method not in known:
+            raise ValueError(f"unknown screen method {method!r} (expected one of {known})")
         self.requested_method = method
         self.touch_event = touch_event if touch_event is not None else find_touchscreen(sysfs, dev)
         self.wake_seconds = wake_seconds
@@ -56,10 +59,9 @@ class ScreenController:
 
     def candidates(self) -> List[ScreenMethod]:
         """Strategies in the order they are tried for the requested method."""
-        order = {"gamescope": self.gamescope, "kscreen": self.kscreen, "backlight": self.backlight_method}
-        if self.requested_method == "auto":
-            return [order["gamescope"], order["kscreen"], order["backlight"]]
-        return [order[self.requested_method]]
+        if self.requested_method == AUTO_METHOD:
+            return list(self.strategies)
+        return [strategy for strategy in self.strategies if strategy.name == self.requested_method]
 
     def activate(self) -> None:
         with self._lock:

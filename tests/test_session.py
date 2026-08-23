@@ -149,12 +149,12 @@ class HoldDetectorTest(unittest.TestCase):
         self.assertFalse(d.feed(0, 10.0))
 
 
-def make_session(clock, source, transport, screen=None, udc=None, **kw):
+def make_session(clock, source, transport, screen=None):
     cfg = RunConfig(kill_combo="L4+R4", kill_hold_ms=1500, screen_off=screen is not None)
     events = NullEventSink()
-    ses = SES.Session(cfg, source, Xbox360Profile(), transport, screen=screen, udc_state=udc, events=events,
+    ses = SES.Session(cfg, source, Xbox360Profile(), transport, screen=screen, events=events,
                       clock=clock, read_timeout=0.01, unplug_grace_s=1.0, metrics_interval=2.0,
-                      udc_poll_interval=0.0, **kw)
+                      udc_poll_interval=0.0)
     return ses, events
 
 
@@ -165,17 +165,15 @@ def states(events):
 class SessionTest(unittest.TestCase):
     def test_combo_kill_flow(self):
         clock = FakeClock()
-        udc = {"state": "not attached"}
         tr = FakeTransport()
 
         def plug():
-            udc["state"] = "configured"
             tr.is_connected = True
 
         src = FakeSource(clock, script=[(0, 0.5), plug, (S.BTN_A, 0.5), (S.BTN_L4, 0.2),
                                         (S.BTN_L4 | S.BTN_R4 | S.BTN_B, 3.0), (0, 5.0)])
         screen = FakeScreen()
-        ses, ev = make_session(clock, src, tr, screen=screen, udc=lambda: udc["state"])
+        ses, ev = make_session(clock, src, tr, screen=screen)
         rc = ses.run()
         self.assertEqual(rc, 0)
         self.assertEqual(ses.kill_reason, "combo")
@@ -203,8 +201,7 @@ class SessionTest(unittest.TestCase):
         cfg = RunConfig(kill_combo="L4+R4", kill_hold_ms=1500, paddles={"L4": "A", "R4": "B"})
         ev = NullEventSink()
         prof = Xbox360Profile(paddles=cfg.paddles)
-        ses = SES.Session(cfg, src, prof, tr, udc_state=lambda: "configured", events=ev, clock=clock,
-                          read_timeout=0.01, udc_poll_interval=0.0)
+        ses = SES.Session(cfg, src, prof, tr, events=ev, clock=clock, read_timeout=0.01, udc_poll_interval=0.0)
         self.assertEqual(ses.run(), 0)
         self.assertEqual(ses.kill_reason, "combo")
         import struct
@@ -215,16 +212,14 @@ class SessionTest(unittest.TestCase):
 
     def test_unplug_kill(self):
         clock = FakeClock()
-        udc = {"state": "configured"}
         tr = FakeTransport()
         tr.is_connected = True
 
         def unplug():
-            udc["state"] = "not attached"
             tr.is_connected = False
 
         src = FakeSource(clock, script=[(0, 0.5), unplug, (0, 5.0)])
-        ses, ev = make_session(clock, src, tr, udc=lambda: udc["state"])
+        ses, ev = make_session(clock, src, tr)
         self.assertEqual(ses.run(), 0)
         self.assertEqual(ses.kill_reason, "unplug")
         self.assertEqual(states(ev)[-3:], ["ACTIVE", "STOPPING", "STOPPED"])
@@ -233,22 +228,18 @@ class SessionTest(unittest.TestCase):
 
     def test_brief_disconnect_is_tolerated(self):
         clock = FakeClock()
-        udc = {"state": "configured"}
         tr = FakeTransport()
         tr.is_connected = True
-        calls = {"n": 0}
 
         def glitch():
-            udc["state"] = "default"
             tr.is_connected = False
 
         def restore():
-            udc["state"] = "configured"
             tr.is_connected = True
 
         src = FakeSource(clock, script=[(0, 0.3), glitch, (0, 0.3), restore, (0, 0.5),
                                         lambda: ses.request_stop("signal")])
-        ses, ev = make_session(clock, src, tr, udc=lambda: udc["state"])
+        ses, ev = make_session(clock, src, tr)
         self.assertEqual(ses.run(), 0)
         self.assertEqual(ses.kill_reason, "signal")
         self.assertNotIn({"ev": "kill", "reason": "unplug"}, ev.events)
@@ -257,7 +248,7 @@ class SessionTest(unittest.TestCase):
         clock = FakeClock()
         tr = FakeTransport()
         src = FakeSource(clock, script=[(0, 0.5), lambda: ses.request_stop("signal"), (0, 1.0)])
-        ses, ev = make_session(clock, src, tr, udc=lambda: "not attached")
+        ses, ev = make_session(clock, src, tr)
         self.assertEqual(ses.run(), 0)
         self.assertEqual(ses.kill_reason, "signal")
         self.assertEqual(states(ev), ["CAPTURING", "GADGET_UP", "WAITING_HOST", "STOPPING", "STOPPED"])
@@ -298,30 +289,33 @@ class SessionTest(unittest.TestCase):
             tr.error = RuntimeError("raw-gadget died")
 
         src = FakeSource(clock, script=[(0, 0.2), boom, (0, 1.0)])
-        ses, ev = make_session(clock, src, tr, udc=lambda: "configured")
+        ses, ev = make_session(clock, src, tr)
         self.assertEqual(ses.run(), 1)
         self.assertEqual(ses.kill_reason, "error")
         self.assertTrue(tr.stopped and src.closed)
 
-    def test_feedback_logged_not_forwarded_by_default(self):
+    def test_host_feedback_is_observed_and_never_forwarded_to_the_controller(self):
         clock = FakeClock()
         tr = FakeTransport()
         tr.is_connected = True
         src = FakeSource(clock, script=[(0, 0.1), lambda: tr.on_feedback(Feedback("rumble", 100, 200)),
                                         lambda: ses.request_stop("signal")])
-        ses, ev = make_session(clock, src, tr, udc=lambda: "configured")
+        ses, ev = make_session(clock, src, tr)
         ses.run()
         self.assertEqual(src.rumbles, [])
         self.assertEqual(ses.last_feedback.kind, "rumble")
-        # opt-in forwarding
+
+    def test_metrics_event_carries_out_reports(self):
         clock = FakeClock()
         tr = FakeTransport()
         tr.is_connected = True
-        src = FakeSource(clock, script=[(0, 0.1), lambda: tr.on_feedback(Feedback("rumble", 100, 200)),
-                                        lambda: ses2.request_stop("signal")])
-        ses2, ev = make_session(clock, src, tr, udc=lambda: "configured", forward_rumble=True)
-        ses2.run()
-        self.assertEqual(src.rumbles, [(100, 200)])
+        tr._m.out_reports = 3
+        src = FakeSource(clock, script=[(0, 2.5), lambda: ses.request_stop("signal")])
+        ses, ev = make_session(clock, src, tr)
+        ses.run()
+        metrics = [e for e in ev.events if e["ev"] == "metrics"]
+        self.assertTrue(metrics)
+        self.assertEqual(metrics[-1]["out_reports"], 3)
 
     def test_request_stop_before_run(self):
         clock = FakeClock()

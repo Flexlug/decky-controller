@@ -6,6 +6,7 @@ import unittest
 import _path  # noqa: F401
 
 from deckgadget.platform.display.backlight import Backlight, BacklightDim
+from deckgadget.platform.display.base import STATE_FILE_NAME, default_state_file
 from fakes import read, write
 
 
@@ -50,6 +51,15 @@ class BacklightTest(unittest.TestCase):
         self.assertFalse(b.available)
         b.save_and_off()   # no exception
         self.assertIsNone(b.restore())
+
+    def test_default_state_file_chooses_without_creating_anything(self):
+        path = default_state_file()
+        directory = os.path.dirname(path)
+        existed = os.path.isdir(directory)
+        self.assertEqual(os.path.basename(path), STATE_FILE_NAME)
+        self.assertEqual(default_state_file(), path)
+        self.assertEqual(os.path.isdir(directory), existed)
+        self.assertTrue(os.access(directory if existed else os.path.dirname(directory), os.W_OK))
 
     def test_backlight_dim_strategy(self):
         m = BacklightDim(Backlight(self.bl, self.state))

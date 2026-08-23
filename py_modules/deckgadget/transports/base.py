@@ -69,6 +69,26 @@ class ReportSlot:
 
 FeedbackCallback = Callable[[Feedback], None]
 
+
+def dispatch_output_report(profile: Profile, data: bytes, on_feedback: Optional[FeedbackCallback],
+                           metrics: TransportMetrics) -> None:
+    """One host OUT report: count it, let the profile decode it, hand the feedback to the session."""
+    metrics.out_reports += 1
+    try:
+        feedback = profile.on_output(data)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("on_output failed: %s", exc)
+        return
+    if feedback is None:
+        return
+    log.debug("host -> %s: %s", feedback.kind, data.hex())
+    if on_feedback is not None:
+        try:
+            on_feedback(feedback)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("feedback callback failed: %s", exc)
+
+
 _cancel_installed = False
 
 

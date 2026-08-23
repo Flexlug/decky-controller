@@ -61,8 +61,6 @@ DEFAULT_BUTTON_MAP = (
     (S.BTN_DPAD_LEFT, XB_DPAD_LEFT), (S.BTN_DPAD_RIGHT, XB_DPAD_RIGHT),
 )
 
-PADDLE_BITS = {"L4": S.BTN_L4, "L5": S.BTN_L5, "R4": S.BTN_R4, "R5": S.BTN_R5}
-
 REPORT_LEN = 20
 _REPORT = struct.Struct("<BBHBBhhhh6x")
 
@@ -114,7 +112,7 @@ class Xbox360Profile:
     report_length = REPORT_LEN
 
     def __init__(self, paddles: Optional[Dict[str, str]] = None, forward_steam: bool = False,
-                 forward_qam: bool = False, invert_y: bool = False) -> None:
+                 forward_qam: bool = False) -> None:
         table = list(DEFAULT_BUTTON_MAP)
         if forward_steam:
             table.append((S.BTN_STEAM, XB_GUIDE))
@@ -126,10 +124,8 @@ class Xbox360Profile:
                 continue
             if action not in XB_BY_TARGET:
                 raise ValueError(f"unknown paddle target {target!r}")
-            table.append((PADDLE_BITS[paddle.upper()], XB_BY_TARGET[action]))
+            table.append((S.PADDLE_BITS[paddle.upper()], XB_BY_TARGET[action]))
         self._table = tuple(table)
-        # Deck sticks report +Y = up, same as XInput
-        self._y_sign = -1 if invert_y else 1
         self._last_report = _REPORT.pack(0x00, REPORT_LEN, 0, 0, 0, 0, 0, 0, 0)
 
     def map_buttons(self, canonical: int) -> int:
@@ -140,12 +136,12 @@ class Xbox360Profile:
         return xbox_buttons
 
     def pack(self, state: ControllerState) -> bytes:
-        y_sign = self._y_sign
+        # Deck sticks report +Y = up, same as XInput: no inversion
         report = _REPORT.pack(
             0x00, REPORT_LEN, self.map_buttons(state.buttons),
             trigger_to_u8(state.lt), trigger_to_u8(state.rt),
-            S.clamp_s16(state.lx), S.clamp_s16(y_sign * state.ly),
-            S.clamp_s16(state.rx), S.clamp_s16(y_sign * state.ry),
+            S.clamp_s16(state.lx), S.clamp_s16(state.ly),
+            S.clamp_s16(state.rx), S.clamp_s16(state.ry),
         )
         self._last_report = report
         return report

@@ -7,9 +7,10 @@ import logging
 import os
 from typing import Any, Optional
 
+from controller_backend.daemon.events import JsonDict
+
 log = logging.getLogger("controller_backend.settings")
 
-JsonDict = dict[str, Any]
 
 PROFILES = ("xbox360", "hid_gamepad")
 TRANSPORTS = ("auto", "raw", "hid")

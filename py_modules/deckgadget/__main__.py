@@ -74,14 +74,21 @@ def config_from_args(args: argparse.Namespace, demo: bool = False) -> C.RunConfi
     )
 
 
-def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = True) -> Dict[str, Any]:
+def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = True, *,
+                   configfs: Optional[str] = None, run_user_base: Optional[str] = None,
+                   state_file: Optional[str] = None) -> Dict[str, Any]:
+    """The ``status`` JSON. Roots default to the real system; tests point every one of them at a fake tree."""
     from deckhw.facts import hardware_facts
 
     from deckgadget.platform import guard
-    from deckgadget.platform.display.backlight import Backlight
-    from deckgadget.platform.display.compositor import GamescopeSleep, KscreenDpms
+    from deckgadget.platform.display.backlight import BACKLIGHT_NAME, Backlight
+    from deckgadget.platform.display.base import default_state_file
+    from deckgadget.platform.display.compositor import DECK_UID, RUN_USER_BASE, GamescopeSleep, KscreenDpms
     from deckgadget.platform.display.touch import find_touchscreen
 
+    configfs = configfs or guard.CONFIGFS
+    run_user_base = run_user_base or RUN_USER_BASE
+    state_file = state_file or default_state_file()
     out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": [], "root": os.geteuid() == 0}
     try:
         out.update(hardware_facts(sysfs, dev, use_modprobe=use_modprobe))
@@ -89,24 +96,25 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
         out["errors"].append(f"hardware: {exc}")
         out.update({"neptune_present": False, "neptune_captured": False})
     try:
-        out["gadgets"] = guard.list_gadgets()
+        out["gadgets"] = guard.list_gadgets(configfs)
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"gadgets: {exc}")
+    backlight_available = False
     try:
-        backlight = Backlight()
-        out["backlight"] = {"available": backlight.available,
-                            "brightness": backlight.brightness() if backlight.available else None,
-                            "max": backlight.max_brightness() if backlight.available else None,
+        backlight = Backlight(os.path.join(sysfs, "class", "backlight", BACKLIGHT_NAME), state_file)
+        backlight_available = backlight.available
+        out["backlight"] = {"available": backlight_available,
+                            "brightness": backlight.brightness() if backlight_available else None,
+                            "max": backlight.max_brightness() if backlight_available else None,
                             "saved": backlight.saved_value(), "state_file": backlight.state_file}
-        out["screen_off"] = bool(backlight.available and backlight.brightness() == 0
+        out["screen_off"] = bool(backlight_available and backlight.brightness() == 0
                                  and backlight.saved_value() is not None)
         out["touchscreen"] = find_touchscreen(sysfs, dev)
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"screen: {exc}")
     try:
-        gamescope = GamescopeSleep()
-        kscreen = KscreenDpms()
-        backlight_available = bool(out.get("backlight", {}).get("available")) if isinstance(out.get("backlight"), dict) else False
+        gamescope = GamescopeSleep(run_user_base=run_user_base)
+        kscreen = KscreenDpms(runtime_dir=os.path.join(run_user_base, str(DECK_UID)))
         # what would work right now; auto tries gamescope -> kscreen -> backlight
         out["screen_methods"] = {"gamescope": gamescope.available(), "kscreen": kscreen.available(),
                                  "backlight": backlight_available}
@@ -158,7 +166,24 @@ def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGHUP, on_signal)
-    return session.run()
+    exit_code = session.run()
+    _report_leftovers()
+    return exit_code
+
+
+def _report_leftovers(sysfs: str = "/sys", dev: str = "/dev", configfs: Optional[str] = None) -> None:
+    """After the session's own best-effort teardown: anything still captured or bound is an ERROR (the Decky
+    backend runs ``recover`` anyway; a standalone run must not look clean when it is not)."""
+    from deckhw.neptune import find_neptune
+
+    from deckgadget.platform import guard
+
+    device = find_neptune(sysfs, dev)
+    if device is not None and device.captured:
+        log.error("teardown left the built-in controller detached from usbhid — run `deckgadget recover`")
+    gadgets = guard.list_gadgets(configfs or guard.CONFIGFS)
+    if gadgets:
+        log.error("teardown left configfs gadget(s) %s — run `deckgadget recover`", ", ".join(gadgets))
 
 
 def cmd_probe(args: argparse.Namespace) -> int:

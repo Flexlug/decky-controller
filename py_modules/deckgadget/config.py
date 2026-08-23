@@ -54,36 +54,29 @@ def parse_kill_combo(text: str) -> int:
 
 
 def parse_paddles(text: Optional[str]) -> Dict[str, str]:
-    """``"L4=none,L5=A,R4=none,R5=B"`` -> dict; unspecified paddles default to ``none``."""
-    result = dict(DEFAULT_PADDLES)
-    if not text:
-        return result
-    for item in text.split(","):
+    """``"L4=none,L5=A,R4=none,R5=B"`` -> validated dict; unspecified paddles default to ``none``."""
+    pairs: Dict[str, str] = {}
+    for item in (text or "").split(","):
         item = item.strip()
         if not item:
             continue
         if "=" not in item:
             raise ConfigError(f"bad paddle mapping {item!r} (expected NAME=TARGET)")
         name, target = (piece.strip() for piece in item.split("=", 1))
-        name = name.upper()
-        if name not in PADDLE_NAMES:
-            raise ConfigError(f"unknown paddle {name!r} (expected one of {PADDLE_NAMES})")
-        target = "none" if target.lower() == "none" else target.upper()
-        if target not in PADDLE_TARGETS:
-            raise ConfigError(f"unknown paddle target {target!r} (expected one of {PADDLE_TARGETS})")
-        result[name] = target
-    return result
+        pairs[name] = target
+    return validate_paddles(pairs)
 
 
 def validate_paddles(paddles: Dict[str, str]) -> Dict[str, str]:
+    """Paddle names and targets normalised to their canonical spelling; unknown ones are a ``ConfigError``."""
     out = dict(DEFAULT_PADDLES)
     for name, target in (paddles or {}).items():
         paddle = str(name).upper()
         if paddle not in PADDLE_NAMES:
-            raise ConfigError(f"unknown paddle {name!r}")
+            raise ConfigError(f"unknown paddle {name!r} (expected one of {PADDLE_NAMES})")
         action = "none" if str(target).lower() == "none" else str(target).upper()
         if action not in PADDLE_TARGETS:
-            raise ConfigError(f"unknown paddle target {target!r}")
+            raise ConfigError(f"unknown paddle target {target!r} (expected one of {PADDLE_TARGETS})")
         out[paddle] = action
     return out
 
@@ -105,11 +98,7 @@ class RunConfig:
     forward_qam: bool = False
 
     def __post_init__(self) -> None:
-        if self.profile not in PROFILES:
-            raise ConfigError(f"unknown profile {self.profile!r}")
-        if self.transport not in TRANSPORTS:
-            raise ConfigError(f"unknown transport {self.transport!r}")
-        self.resolved_transport = resolve_transport(self.profile, self.transport)
+        self.resolved_transport = resolve_transport(self.profile, self.transport)   # validates both values
         self.kill_mask = parse_kill_combo(self.kill_combo)
         try:
             self.kill_hold_ms = int(self.kill_hold_ms)
