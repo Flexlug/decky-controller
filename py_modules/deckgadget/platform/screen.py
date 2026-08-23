@@ -31,6 +31,7 @@ import time
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from ..util.log import get_logger
+from ..util.fs import read_text, write_text
 
 log = get_logger("screen")
 
@@ -62,19 +63,6 @@ BTN_TOUCH = 0x14A
 ABS_MT_TRACKING_ID = 0x39
 
 
-def _read(path: str) -> Optional[str]:
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read().strip()
-    except OSError:
-        return None
-
-
-def _write(path: str, text: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-
-
 def default_state_file(run_dir: Optional[str] = None) -> str:
     """First writable state dir wins (``/run/deckgadget`` is created if possible)."""
     dirs = (run_dir,) if run_dir else STATE_DIRS
@@ -103,27 +91,27 @@ class Backlight:
         return os.path.exists(os.path.join(self.dir, "brightness"))
 
     def brightness(self) -> Optional[int]:
-        v = _read(os.path.join(self.dir, "brightness"))
+        v = read_text(os.path.join(self.dir, "brightness"))
         try:
             return int(v) if v is not None else None
         except ValueError:
             return None
 
     def max_brightness(self) -> int:
-        v = _read(os.path.join(self.dir, "max_brightness"))
+        v = read_text(os.path.join(self.dir, "max_brightness"))
         try:
             return max(1, int(v)) if v else 255
         except ValueError:
             return 255
 
     def set_brightness(self, value: int) -> None:
-        _write(os.path.join(self.dir, "brightness"), str(int(value)))
+        write_text(os.path.join(self.dir, "brightness"), str(int(value)))
 
     def saved_value(self) -> Optional[int]:
         """Value remembered in memory or in the state file (``None`` when nothing saved)."""
         if self._saved is not None:
             return self._saved
-        v = _read(self.state_file)
+        v = read_text(self.state_file)
         try:
             return int(v) if v else None
         except ValueError:
@@ -150,7 +138,7 @@ class Backlight:
         value = cur if cur and cur > 0 else (prev if prev else self._safe_value(None))
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            _write(self.state_file, str(value))
+            write_text(self.state_file, str(value))
         except OSError as exc:
             log.warning("cannot persist brightness to %s: %s", self.state_file, exc)
         self._saved = value
@@ -527,7 +515,7 @@ def find_touchscreen(sysfs: str = "/sys", dev: str = "/dev",
     for entry in entries:
         if not entry.startswith("event"):
             continue
-        name = _read(os.path.join(base, entry, "device", "name")) or ""
+        name = read_text(os.path.join(base, entry, "device", "name")) or ""
         if name_substr.lower() in name.lower():
             return os.path.join(dev, "input", entry)
     # Fallback: /proc/bus/input/devices ("N: Name=..." followed by "H: Handlers=... eventN")

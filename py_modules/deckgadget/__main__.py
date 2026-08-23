@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from . import __version__
 from . import config as C
 from .util.log import JsonEventSink, get_logger, setup_logging
+from .util.fs import read_text
 
 log = get_logger("cli")
 
@@ -78,20 +79,13 @@ def config_from_args(args: argparse.Namespace, demo: bool = False) -> C.RunConfi
 # status
 # --------------------------------------------------------------------------------------
 
-def _read(path: str) -> Optional[str]:
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read().strip()
-    except OSError:
-        return None
-
 
 def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = True) -> Dict[str, Any]:
     from .platform import guard, neptune, screen, usb_role
 
     out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": []}
     out["kernel"] = os.uname().release
-    out["model"] = _read(os.path.join(sysfs, "class", "dmi", "id", "product_name"))
+    out["model"] = read_text(os.path.join(sysfs, "class", "dmi", "id", "product_name"))
     out["root"] = (os.geteuid() == 0)
     try:
         out.update(usb_role.usb_role_status(sysfs, dev, use_modprobe=use_modprobe).as_dict())

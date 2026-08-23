@@ -305,13 +305,13 @@ class RecoverTest(unittest.TestCase):
         # (the directory is gone now; check through a second gadget whose removal is blocked)
         g2 = self.fs.add_gadget("deckctl_x")
         seen = {}
-        real_write = guard._write
+        real_write = guard.write_text
 
         def spy(path, text):
             seen[path] = text
             real_write(path, text)
 
-        with mock.patch.object(guard, "_write", spy):
+        with mock.patch.object(guard, "write_text", spy):
             guard.remove_configfs_gadget(g2)
         self.assertEqual(seen.get(os.path.join(g2, "UDC")), "\n")
 

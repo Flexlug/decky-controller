@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from ..util.log import get_logger
+from ..util.fs import read_text
 
 log = get_logger("usb_role")
 
@@ -38,16 +39,8 @@ PC_PORT_MAX_MV = 5500                         # <= 5.5 V contract = plain USB po
 CABLE_KINDS = ("none", "pc", "charger", "host_device", "unknown")
 
 
-def _read(path: str, default: Optional[str] = None) -> Optional[str]:
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read().strip()
-    except OSError:
-        return default
-
-
 def _read_int(path: str) -> Optional[int]:
-    txt = _read(path)
+    txt = read_text(path)
     if txt is None:
         return None
     try:
@@ -70,7 +63,7 @@ def udc_state(udc: Optional[str] = None, sysfs: str = "/sys") -> Optional[str]:
         if not udcs:
             return None
         udc = udcs[0]
-    return _read(os.path.join(sysfs, "class", "udc", udc, "state"))
+    return read_text(os.path.join(sysfs, "class", "udc", udc, "state"))
 
 
 def udc_attr(name: str, udc: Optional[str] = None, sysfs: str = "/sys") -> Optional[str]:
@@ -79,7 +72,7 @@ def udc_attr(name: str, udc: Optional[str] = None, sysfs: str = "/sys") -> Optio
         if not udcs:
             return None
         udc = udcs[0]
-    return _read(os.path.join(sysfs, "class", "udc", udc, name))
+    return read_text(os.path.join(sysfs, "class", "udc", udc, name))
 
 
 def extcon_cables(sysfs: str = "/sys") -> Dict[str, int]:
@@ -91,7 +84,7 @@ def extcon_cables(sysfs: str = "/sys") -> Dict[str, int]:
     except OSError:
         return result
     for dev in devices:
-        state = _read(os.path.join(base, dev, "state"))
+        state = read_text(os.path.join(base, dev, "state"))
         if not state:
             continue
         for line in state.splitlines():
@@ -115,7 +108,7 @@ def cable_power(sysfs: str = "/sys") -> Optional[bool]:
     candidates = [AC_SUPPLY_NAME]
     try:
         for name in sorted(os.listdir(base)):
-            if name != AC_SUPPLY_NAME and _read(os.path.join(base, name, "type")) == "Mains":
+            if name != AC_SUPPLY_NAME and read_text(os.path.join(base, name, "type")) == "Mains":
                 candidates.append(name)
     except OSError:
         pass
@@ -135,7 +128,7 @@ def find_hwmon(name: str, sysfs: str = "/sys") -> Optional[str]:
         return None
     for entry in entries:
         path = os.path.join(base, entry)
-        if _read(os.path.join(path, "name")) == name:
+        if read_text(os.path.join(path, "name")) == name:
             return path
     return None
 
@@ -154,7 +147,7 @@ def _hwmon_channel(hwmon_dir: str, prefix: str, label: str, default_channel: int
     if not labels:
         return _read_int(os.path.join(hwmon_dir, f"{prefix}{default_channel}_input"))
     for fn in labels:
-        if _read(os.path.join(hwmon_dir, fn)) == label:
+        if read_text(os.path.join(hwmon_dir, fn)) == label:
             return _read_int(os.path.join(hwmon_dir, fn[:-len("_label")] + "_input"))
     return None
 
@@ -215,9 +208,9 @@ def detect_drd(sysfs: str = "/sys", use_modprobe: bool = True) -> Dict[str, obje
             pass
         if drv == DWC3_PCI_DRIVER:
             return {"enabled": True, "pci": dev, "driver": drv, "via": "driver"}
-        cls = _read(os.path.join(path, "class"), "") or ""
+        cls = read_text(os.path.join(path, "class"), "") or ""
         if cls.lower().startswith("0x0c03"):  # USB controllers only, keeps status fast
-            candidates.append((dev, drv, _read(os.path.join(path, "modalias"), "") or ""))
+            candidates.append((dev, drv, read_text(os.path.join(path, "modalias"), "") or ""))
     if use_modprobe:
         for dev, drv, modalias in candidates:
             if modalias and _modalias_resolves_to(modalias, DWC3_PCI_MODULE):
@@ -229,7 +222,7 @@ def raw_gadget_available(dev: str = "/dev", sysfs: str = "/sys") -> bool:
     """/dev/raw-gadget exists, or the module is present in the running kernel's tree."""
     if os.path.exists(os.path.join(dev, "raw-gadget")):
         return True
-    release = _read("/proc/sys/kernel/osrelease")
+    release = read_text("/proc/sys/kernel/osrelease")
     if not release:
         return False
     for candidate in (f"/lib/modules/{release}/kernel/drivers/usb/gadget/legacy/raw_gadget.ko.zst",
@@ -307,7 +300,7 @@ class UdcWatcher:
     def state(self) -> Optional[str]:
         if self._path is None and self.resolve() is None:
             return None
-        return _read(self._path)  # type: ignore[arg-type]
+        return read_text(self._path)  # type: ignore[arg-type]
 
     def configured(self) -> bool:
         return self.state() == UDC_STATE_CONFIGURED

@@ -22,6 +22,7 @@ import os
 from typing import Dict, List, Optional
 
 from ..util.log import get_logger
+from ..util.fs import write_text
 from . import neptune as neptune_mod
 from .screen import BACKLIGHT_DIR, Backlight, GamescopeSleep, KscreenDpms, ScreenMethod, default_state_file
 
@@ -29,11 +30,6 @@ log = get_logger("guard")
 
 CONFIGFS = "/sys/kernel/config"
 GADGET_PREFIX = "deckctl"
-
-
-def _write(path: str, text: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
 
 
 def _rmdir_quiet(path: str) -> bool:
@@ -90,7 +86,7 @@ def remove_configfs_gadget(gadget_dir: str) -> Dict[str, object]:
         # A bare "\n" (configfs spike: ``echo "" > UDC``) — gadget_dev_desc_UDC_store() strips the trailing
         # newline and an empty name means "unregister".  Writing "" from Python issues no write(2)
         # at all (TextIOWrapper drops empty strings), so the unbind would silently not happen.
-        _write(udc_file, "\n")
+        write_text(udc_file, "\n")
         report["unbound"] = True
     except OSError as exc:
         # ENODEV: the gadget was not bound to any UDC — nothing to unbind.

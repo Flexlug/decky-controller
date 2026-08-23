@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from ..util.log import get_logger
+from ..util.fs import read_text, write_text
 
 log = get_logger("neptune")
 
@@ -29,19 +30,6 @@ CAPTURE_INTERFACES = (0, 1, 2)
 #: interface carrying the controller state reports / accepting feature reports
 CONTROLLER_INTERFACE = 2
 EP_XFER_INTERRUPT = 0x03
-
-
-def _read(path: str) -> Optional[str]:
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read().strip()
-    except OSError:
-        return None
-
-
-def _write(path: str, text: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
 
 
 @dataclass
@@ -127,7 +115,7 @@ def _parse_hex(text: Optional[str], default: int = 0) -> int:
 
 
 def _parse_interface(itf_path: str) -> Optional[Interface]:
-    number = _read(os.path.join(itf_path, "bInterfaceNumber"))
+    number = read_text(os.path.join(itf_path, "bInterfaceNumber"))
     if number is None:
         return None
     driver = None
@@ -144,21 +132,21 @@ def _parse_interface(itf_path: str) -> Optional[Interface]:
         if not entry.startswith("ep_"):
             continue
         ep_path = os.path.join(itf_path, entry)
-        addr = _parse_hex(_read(os.path.join(ep_path, "bEndpointAddress")), -1)
+        addr = _parse_hex(read_text(os.path.join(ep_path, "bEndpointAddress")), -1)
         if addr < 0:
             continue
         eps.append(Endpoint(
             address=addr,
-            attributes=_parse_hex(_read(os.path.join(ep_path, "bmAttributes"))),
-            max_packet=_parse_hex(_read(os.path.join(ep_path, "wMaxPacketSize"))),
-            interval=_parse_hex(_read(os.path.join(ep_path, "bInterval"))),
-            direction=(_read(os.path.join(ep_path, "direction")) or ("in" if addr & 0x80 else "out")).lower(),
+            attributes=_parse_hex(read_text(os.path.join(ep_path, "bmAttributes"))),
+            max_packet=_parse_hex(read_text(os.path.join(ep_path, "wMaxPacketSize"))),
+            interval=_parse_hex(read_text(os.path.join(ep_path, "bInterval"))),
+            direction=(read_text(os.path.join(ep_path, "direction")) or ("in" if addr & 0x80 else "out")).lower(),
         ))
     return Interface(
         name=os.path.basename(itf_path), number=int(number, 16), driver=driver,
-        cls=_parse_hex(_read(os.path.join(itf_path, "bInterfaceClass"))),
-        subclass=_parse_hex(_read(os.path.join(itf_path, "bInterfaceSubClass"))),
-        protocol=_parse_hex(_read(os.path.join(itf_path, "bInterfaceProtocol"))),
+        cls=_parse_hex(read_text(os.path.join(itf_path, "bInterfaceClass"))),
+        subclass=_parse_hex(read_text(os.path.join(itf_path, "bInterfaceSubClass"))),
+        protocol=_parse_hex(read_text(os.path.join(itf_path, "bInterfaceProtocol"))),
         endpoints=eps,
     )
 
@@ -175,17 +163,17 @@ def find_neptune(sysfs: str = "/sys", dev: str = "/dev", vid: str = NEPTUNE_VID,
         if ":" in entry or entry.startswith("usb"):
             continue  # interfaces / root hubs
         path = os.path.join(base, entry)
-        if _read(os.path.join(path, "idVendor")) != vid or _read(os.path.join(path, "idProduct")) != pid:
+        if read_text(os.path.join(path, "idVendor")) != vid or read_text(os.path.join(path, "idProduct")) != pid:
             continue
         try:
-            busnum = int(_read(os.path.join(path, "busnum")) or "0")
-            devnum = int(_read(os.path.join(path, "devnum")) or "0")
+            busnum = int(read_text(os.path.join(path, "busnum")) or "0")
+            devnum = int(read_text(os.path.join(path, "devnum")) or "0")
         except ValueError:
             continue
         device = NeptuneDevice(
             sysfs_path=path, name=entry, busnum=busnum, devnum=devnum,
             devnode=os.path.join(dev, "bus", "usb", f"{busnum:03d}", f"{devnum:03d}"),
-            product=_read(os.path.join(path, "product")), serial=_read(os.path.join(path, "serial")),
+            product=read_text(os.path.join(path, "product")), serial=read_text(os.path.join(path, "serial")),
         )
         prefix = entry + ":"
         for sub in sorted(os.listdir(path)):
@@ -216,7 +204,7 @@ class UsbhidBinder:
         if self.bound_driver(itf_name) != USBHID_DRIVER:
             return False
         try:
-            _write(os.path.join(self.driver_dir, "unbind"), itf_name)
+            write_text(os.path.join(self.driver_dir, "unbind"), itf_name)
             log.info("unbound %s from usbhid", itf_name)
             return True
         except OSError as exc:
@@ -229,7 +217,7 @@ class UsbhidBinder:
         if self.bound_driver(itf_name) is not None:
             return False
         try:
-            _write(os.path.join(self.driver_dir, "bind"), itf_name)
+            write_text(os.path.join(self.driver_dir, "bind"), itf_name)
             log.info("bound %s to usbhid", itf_name)
             return True
         except OSError as exc:
@@ -238,7 +226,7 @@ class UsbhidBinder:
             # Fall back to letting the core pick a driver (drivers_probe).
             probe = os.path.join(self.sysfs, "bus", "usb", "drivers_probe")
             try:
-                _write(probe, itf_name)
+                write_text(probe, itf_name)
                 log.info("re-probed %s via drivers_probe (bind failed: %s)", itf_name, exc)
                 return True
             except OSError:

@@ -19,21 +19,16 @@ from typing import Optional
 from ..platform import guard, usb_role
 from ..profiles.base import HidFunction, Profile
 from ..util.log import get_logger
+from ..util.fs import write_bytes, write_text
 from .base import FeedbackCallback, ReportSlot, TransportError, TransportMetrics
 
 log = get_logger("usb_hid")
 
-DEFAULT_CONFIGFS = "/sys/kernel/config"
+DEFAULT_CONFIGFS = guard.CONFIGFS
 GADGET_NAME = "deckctl_hid"
 FUNCTION_NAME = "hid.usb0"
 CONFIG_NAME = "c.1"
 LANG = "0x409"
-
-
-def _write(path: str, data) -> None:
-    mode = "wb" if isinstance(data, (bytes, bytearray)) else "w"
-    with open(path, mode) as f:
-        f.write(data)
 
 
 class UsbHidTransport:
@@ -145,29 +140,29 @@ class UsbHidTransport:
     def _build_gadget(self, hid: HidFunction, udc: str) -> None:
         g = self.gadget_dir
         os.makedirs(g, exist_ok=True)
-        _write(os.path.join(g, "idVendor"), f"0x{hid.vid:04x}")
-        _write(os.path.join(g, "idProduct"), f"0x{hid.pid:04x}")
-        _write(os.path.join(g, "bcdDevice"), "0x0100")
-        _write(os.path.join(g, "bcdUSB"), "0x0200")
+        write_text(os.path.join(g, "idVendor"), f"0x{hid.vid:04x}")
+        write_text(os.path.join(g, "idProduct"), f"0x{hid.pid:04x}")
+        write_text(os.path.join(g, "bcdDevice"), "0x0100")
+        write_text(os.path.join(g, "bcdUSB"), "0x0200")
         strings = os.path.join(g, "strings", LANG)
         os.makedirs(strings, exist_ok=True)
-        _write(os.path.join(strings, "serialnumber"), hid.serial)
-        _write(os.path.join(strings, "manufacturer"), hid.manufacturer)
-        _write(os.path.join(strings, "product"), hid.product)
+        write_text(os.path.join(strings, "serialnumber"), hid.serial)
+        write_text(os.path.join(strings, "manufacturer"), hid.manufacturer)
+        write_text(os.path.join(strings, "product"), hid.product)
         cfg = os.path.join(g, "configs", CONFIG_NAME)
         os.makedirs(os.path.join(cfg, "strings", LANG), exist_ok=True)
-        _write(os.path.join(cfg, "strings", LANG, "configuration"), "Config 1")
-        _write(os.path.join(cfg, "MaxPower"), "250")
+        write_text(os.path.join(cfg, "strings", LANG, "configuration"), "Config 1")
+        write_text(os.path.join(cfg, "MaxPower"), "250")
         fn = os.path.join(g, "functions", FUNCTION_NAME)
         os.makedirs(fn, exist_ok=True)
-        _write(os.path.join(fn, "protocol"), str(hid.protocol))
-        _write(os.path.join(fn, "subclass"), str(hid.subclass))
-        _write(os.path.join(fn, "report_length"), str(hid.report_length))
-        _write(os.path.join(fn, "report_desc"), bytes(hid.report_desc))
+        write_text(os.path.join(fn, "protocol"), str(hid.protocol))
+        write_text(os.path.join(fn, "subclass"), str(hid.subclass))
+        write_text(os.path.join(fn, "report_length"), str(hid.report_length))
+        write_bytes(os.path.join(fn, "report_desc"), bytes(hid.report_desc))
         link = os.path.join(cfg, FUNCTION_NAME)
         if not os.path.lexists(link):
             os.symlink(fn, link)
-        _write(os.path.join(g, "UDC"), udc)
+        write_text(os.path.join(g, "UDC"), udc)
 
     def _find_hidg_node(self, timeout: float = 2.0) -> str:
         """Map ``functions/hid.usb0/dev`` (``major:minor``) to ``/dev/hidgN``."""
