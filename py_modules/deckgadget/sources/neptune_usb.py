@@ -19,7 +19,9 @@ import time
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import state as S
-from ..platform import neptune as neptune_mod
+from deckhw.neptune import CONTROLLER_INTERFACE, NeptuneDevice, find_neptune
+
+from ..platform import neptune_binding
 from ..state import ControllerState
 from ..util.ioctl import IO, IOR, IOW, IOWR, ioctl
 from ..util.log import get_logger
@@ -409,12 +411,12 @@ class NeptuneUsbSource:
         self.heartbeat_s = heartbeat_s
         self._device_class = device_class
         self.with_sensors = with_sensors
-        self.device: Optional[neptune_mod.NeptuneDevice] = None
+        self.device: Optional[NeptuneDevice] = None
         self.usb_device: Optional[UsbfsDevice] = None
-        self.interface = neptune_mod.CONTROLLER_INTERFACE
+        self.interface = CONTROLLER_INTERFACE
         self.ep_in = 0x83
         self.detached: List[str] = []
-        self._binder = neptune_mod.UsbhidBinder(sysfs)
+        self._binder = neptune_binding.UsbhidBinder(sysfs)
         self._control_lock = threading.Lock()
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: Optional[threading.Thread] = None
@@ -427,7 +429,7 @@ class NeptuneUsbSource:
     def open(self) -> None:
         if self._opened:
             return
-        device = neptune_mod.find_neptune(self.sysfs, self.dev)
+        device = find_neptune(self.sysfs, self.dev)
         if device is None:
             raise NeptuneError("Steam Deck controller (28de:1205) not found in sysfs")
         controller_interface = device.interface(self.interface)
@@ -443,7 +445,7 @@ class NeptuneUsbSource:
         self.ep_in = endpoint.address
         log.info("neptune %s at %s, iface %d ep 0x%02x", device.name, device.devnode, self.interface, self.ep_in)
         try:
-            self.detached = neptune_mod.capture_interfaces(device, self._binder)
+            self.detached = neptune_binding.capture_interfaces(device, self._binder)
             self.usb_device = self._device_class(device.devnode)
             try:
                 self.usb_device.claim_interface(self.interface)
@@ -477,7 +479,7 @@ class NeptuneUsbSource:
             usb_device.close()
         # all capture interfaces, not only the ones we detached: a crashed run may have left others unbound
         try:
-            rebound = neptune_mod.release_interfaces(self.device, self._binder)
+            rebound = neptune_binding.release_interfaces(self.device, self._binder)
             if rebound:
                 log.info("rebound to usbhid: %s", ", ".join(rebound))
         except Exception as exc:  # noqa: BLE001

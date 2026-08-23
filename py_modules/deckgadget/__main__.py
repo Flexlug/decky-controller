@@ -75,18 +75,21 @@ def config_from_args(args: argparse.Namespace, demo: bool = False) -> C.RunConfi
 
 
 def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = True) -> Dict[str, Any]:
-    from .platform import guard, neptune, screen, usb_role
+    from deckhw.neptune import find_neptune
+    from deckhw.port import read_port_status
+
+    from .platform import guard, screen
 
     out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": []}
     out["kernel"] = os.uname().release
     out["model"] = read_text(os.path.join(sysfs, "class", "dmi", "id", "product_name"))
     out["root"] = (os.geteuid() == 0)
     try:
-        out.update(usb_role.usb_role_status(sysfs, dev, use_modprobe=use_modprobe).as_dict())
+        out.update(read_port_status(sysfs, dev, use_modprobe=use_modprobe).as_dict())
     except Exception as exc:  # noqa: BLE001
-        out["errors"].append(f"usb_role: {exc}")
+        out["errors"].append(f"port: {exc}")
     try:
-        device = neptune.find_neptune(sysfs, dev)
+        device = find_neptune(sysfs, dev)
         out["neptune_present"] = device is not None
         out["neptune_captured"] = bool(device and device.captured)
         out["neptune"] = device.as_dict() if device else None

@@ -9,7 +9,9 @@ from typing import Dict, List, Optional
 
 from ..util.log import get_logger
 from ..util.fs import write_text
-from . import neptune as neptune_mod
+from deckhw.neptune import CAPTURE_INTERFACES, USBHID_DRIVER, find_neptune
+
+from . import neptune_binding
 from .screen import BACKLIGHT_DIR, Backlight, GamescopeSleep, KscreenDpms, ScreenMethod, default_state_file
 
 log = get_logger("guard")
@@ -134,19 +136,19 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
 
     # raw-gadget needs nothing here: the gadget dies with the daemon's fd.
     try:
-        device = neptune_mod.find_neptune(sysfs, dev)
+        device = find_neptune(sysfs, dev)
         if device is None:
             report["neptune"] = {"present": False}
         else:
-            binder = neptune_mod.UsbhidBinder(sysfs)
+            binder = neptune_binding.UsbhidBinder(sysfs)
             bind_errors: List[str] = []
-            rebound = neptune_mod.release_interfaces(device, binder, errors=bind_errors)
+            rebound = neptune_binding.release_interfaces(device, binder, errors=bind_errors)
             # Re-scan instead of trusting the writes: bind/drivers_probe probe synchronously, so this is
             # authoritative, and a silently ignored bind would otherwise leave the Deck without its controller.
-            rescanned = neptune_mod.find_neptune(sysfs, dev)
-            still_captured = ([interface.name for number in neptune_mod.CAPTURE_INTERFACES
+            rescanned = find_neptune(sysfs, dev)
+            still_captured = ([interface.name for number in CAPTURE_INTERFACES
                                if (interface := rescanned.interface(number)) is not None
-                               and interface.driver != neptune_mod.USBHID_DRIVER]
+                               and interface.driver != USBHID_DRIVER]
                               if rescanned is not None else [])
             report["neptune"] = {"present": True, "name": device.name, "rebound": rebound,
                                  "still_captured": still_captured}

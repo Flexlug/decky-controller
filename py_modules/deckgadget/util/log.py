@@ -14,25 +14,31 @@ from typing import Any, Optional, TextIO
 LOGGER_NAME = "deckgadget"
 
 
+LOGGER_NAMES = (LOGGER_NAME, "deckhw")
+
+
 def setup_logging(level: int = logging.INFO, log_file: Optional[str] = None) -> logging.Logger:
-    """Configure the package logger once; safe to call repeatedly."""
+    """Configure the daemon's loggers (``deckgadget`` and the shared ``deckhw``) once; safe to call repeatedly."""
     log = logging.getLogger(LOGGER_NAME)
     if getattr(log, "_deckgadget_configured", False):
-        log.setLevel(level)
+        for name in LOGGER_NAMES:
+            logging.getLogger(name).setLevel(level)
         return log
-    log.setLevel(level)
-    log.propagate = False
     formatter = logging.Formatter("%(asctime)s %(levelname).1s %(name)s: %(message)s", "%H:%M:%S")
-    stream_handler = logging.StreamHandler(sys.stderr)
-    stream_handler.setFormatter(formatter)
-    log.addHandler(stream_handler)
+    handlers = [logging.StreamHandler(sys.stderr)]
     if log_file:
         try:
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(formatter)
-            log.addHandler(file_handler)
+            handlers.append(logging.FileHandler(log_file))
         except OSError as exc:  # never let logging setup kill the daemon
             log.warning("cannot open log file %s: %s", log_file, exc)
+    for handler in handlers:
+        handler.setFormatter(formatter)
+    for name in LOGGER_NAMES:
+        logger = logging.getLogger(name)
+        logger.setLevel(level)
+        logger.propagate = False
+        for handler in handlers:
+            logger.addHandler(handler)
     log._deckgadget_configured = True  # type: ignore[attr-defined]
     return log
 

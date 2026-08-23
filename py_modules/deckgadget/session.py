@@ -261,7 +261,7 @@ def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sys
                   dev: str = "/dev") -> Session:
     """Wire real components according to ``config`` (``config.demo`` selects the demo source)."""
     from .platform.screen import ScreenController
-    from .platform.usb_role import UdcWatcher
+    from deckhw.udc import Udc
     from .profiles import make_profile
     from .transports import make_transport
 
@@ -280,5 +280,5 @@ def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sys
         screen = ScreenController(wake_seconds=config.touch_wake_seconds, sysfs=sysfs, dev=dev,
                                   method=config.screen_method,
                                   on_change=lambda off, method: events.screen(off, method))
-    watcher = UdcWatcher(config.udc, sysfs)
+    watcher = Udc(sysfs, config.udc)
     return Session(config, source, profile, transport, screen=screen, udc_state=watcher.state, events=events)

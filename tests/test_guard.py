@@ -6,11 +6,12 @@ from unittest import mock
 
 import _path  # noqa: F401
 
-from deckgadget.platform import guard, neptune, screen
+from deckgadget.platform import guard, neptune_binding, screen
+from deckhw.neptune import find_neptune
 from fakes import FakeSysfs, read, write
 
 
-class KernelBinder(neptune.UsbhidBinder):
+class KernelBinder(neptune_binding.UsbhidBinder):
     """UsbhidBinder whose successful ``bind`` also creates the ``driver`` symlink — what the kernel
     does synchronously when usbhid probes the interface (recover() re-scans sysfs to verify)."""
 
@@ -34,7 +35,7 @@ class NeptuneDiscoveryTest(unittest.TestCase):
         shutil.rmtree(self.tmp)
 
     def test_find_neptune(self):
-        dev = neptune.find_neptune(self.fs.sys, self.fs.dev)
+        dev = find_neptune(self.fs.sys, self.fs.dev)
         self.assertIsNotNone(dev)
         self.assertEqual(dev.name, "3-3")
         self.assertEqual(dev.devnode, os.path.join(self.fs.dev, "bus", "usb", "003", "003"))
@@ -47,12 +48,12 @@ class NeptuneDiscoveryTest(unittest.TestCase):
         self.assertFalse(dev.captured)
         self.assertEqual(dev.as_dict()["interfaces"]["2"]["endpoints"], ["0x83/int/64"])
         self.fs.unbind(2)
-        self.assertTrue(neptune.find_neptune(self.fs.sys, self.fs.dev).captured)
+        self.assertTrue(find_neptune(self.fs.sys, self.fs.dev).captured)
 
     def test_capture_and_release(self):
-        dev = neptune.find_neptune(self.fs.sys, self.fs.dev)
-        binder = neptune.UsbhidBinder(self.fs.sys)
-        detached = neptune.capture_interfaces(dev, binder)
+        dev = find_neptune(self.fs.sys, self.fs.dev)
+        binder = neptune_binding.UsbhidBinder(self.fs.sys)
+        detached = neptune_binding.capture_interfaces(dev, binder)
         self.assertEqual(detached, ["3-3:1.0", "3-3:1.1", "3-3:1.2"])
         self.assertEqual(read(os.path.join(self.fs.usbhid, "unbind")), "3-3:1.2")  # last write (fake file is overwritten)
         # simulate the kernel detaching the driver for all three
@@ -60,9 +61,9 @@ class NeptuneDiscoveryTest(unittest.TestCase):
             self.fs.unbind(n)
         # second capture is a no-op
         write(os.path.join(self.fs.usbhid, "unbind"), "")
-        self.assertEqual(neptune.capture_interfaces(neptune.find_neptune(self.fs.sys, self.fs.dev), binder), [])
+        self.assertEqual(neptune_binding.capture_interfaces(find_neptune(self.fs.sys, self.fs.dev), binder), [])
         self.assertEqual(read(os.path.join(self.fs.usbhid, "unbind")), "")
-        rebound = neptune.release_interfaces(neptune.find_neptune(self.fs.sys, self.fs.dev), binder)
+        rebound = neptune_binding.release_interfaces(find_neptune(self.fs.sys, self.fs.dev), binder)
         self.assertEqual(rebound, ["3-3:1.0", "3-3:1.1", "3-3:1.2"])
         self.assertEqual(read(os.path.join(self.fs.usbhid, "bind")), "3-3:1.2")
 
@@ -105,8 +106,8 @@ class RecoverTest(unittest.TestCase):
 
     def recover(self, kernel=True):
         """Run guard.recover(); with ``kernel`` the fake kernel 'probes' rebound interfaces."""
-        binder = (lambda sysfs: KernelBinder(sysfs, self.fs)) if kernel else neptune.UsbhidBinder
-        with mock.patch.object(neptune, "UsbhidBinder", binder):
+        binder = (lambda sysfs: KernelBinder(sysfs, self.fs)) if kernel else neptune_binding.UsbhidBinder
+        with mock.patch.object(neptune_binding, "UsbhidBinder", binder):
             return guard.recover(sysfs=self.fs.sys, configfs=self.fs.configfs, dev=self.fs.dev,
                                  backlight_dir=self.fs.backlight, state_file=self.fs.state_file,
                                  gamescope=self.gamescope, kscreen=self.kscreen)
@@ -178,7 +179,7 @@ class RecoverTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.fs.backlight, "brightness")), "180")
         self.assertFalse(os.path.exists(self.fs.state_file))
         # interfaces are back on usbhid (KernelBinder) -> second run does nothing
-        self.assertFalse(neptune.find_neptune(self.fs.sys, self.fs.dev).captured)
+        self.assertFalse(find_neptune(self.fs.sys, self.fs.dev).captured)
         write(os.path.join(self.fs.usbhid, "bind"), "")
         rep2 = self.recover()
         self.assertTrue(rep2["ok"])

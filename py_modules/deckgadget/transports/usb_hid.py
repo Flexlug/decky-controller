@@ -12,7 +12,9 @@ import threading
 import time
 from typing import Optional
 
-from ..platform import guard, usb_role
+from deckhw.udc import Udc, udc_names
+
+from ..platform import guard
 from ..profiles.base import HidFunction, Profile
 from ..util.log import get_logger
 from ..util.fs import write_bytes, write_text
@@ -50,7 +52,7 @@ class UsbHidTransport:
         self._writer: Optional[threading.Thread] = None
         self._reader: Optional[threading.Thread] = None
         self._error: Optional[BaseException] = None
-        self._udc_watch: Optional[usb_role.UdcWatcher] = None
+        self._udc_watch: Optional[Udc] = None
 
     @property
     def error(self) -> Optional[BaseException]:
@@ -71,11 +73,11 @@ class UsbHidTransport:
             raise TransportError(f"profile {profile.name!r} is not a plain HID device; use transport=raw")
         self.profile, self.hid, self.on_feedback = profile, hid, on_feedback
         self._ensure_configfs()
-        udc = self.udc or (usb_role.list_udcs(self.sysfs) or [None])[0]
+        udc = self.udc or (udc_names(self.sysfs) or [None])[0]
         if not udc:
             raise TransportError("no UDC in /sys/class/udc: DRD disabled in BIOS, or Deck is USB host (dock attached?)")
         self.udc = udc
-        self._udc_watch = usb_role.UdcWatcher(udc, self.sysfs)
+        self._udc_watch = Udc(self.sysfs, udc)
         if os.path.isdir(self.gadget_dir):
             log.warning("stale gadget %s found; removing", self.gadget_dir)
             guard.remove_configfs_gadget(self.gadget_dir)

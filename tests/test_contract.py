@@ -14,7 +14,7 @@ import main
 from deckgadget import config
 from deckgadget import session
 from deckgadget.__main__ import collect_status
-from deckgadget.platform import usb_role
+from deckhw.cable import CABLE_KINDS
 from deckgadget.util import log as daemon_log
 from fakes import FakeSysfs
 
@@ -190,9 +190,9 @@ class SessionStateTest(BackendHarness):
 
 class CableKindTest(unittest.TestCase):
     def test_cable_kinds_agree_and_the_panel_handles_each(self):
-        self.assertEqual(list(usb_role.CABLE_KINDS), ts_union("CableKind"))
+        self.assertEqual(list(CABLE_KINDS), ts_union("CableKind"))
         cable_row = re.search(r"function cableRow\(.*?\n\}", CONTENT_TSX, re.S).group(0)
-        self.assertEqual(set(re.findall(r'case "(\w+)":', cable_row)), set(usb_role.CABLE_KINDS))
+        self.assertEqual(set(re.findall(r'case "(\w+)":', cable_row)), set(CABLE_KINDS))
 
 
 class UiTextBudgetTest(unittest.TestCase):

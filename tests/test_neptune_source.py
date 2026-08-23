@@ -12,12 +12,13 @@ from unittest import mock
 import _path  # noqa: F401
 
 from deckgadget import state as S
-from deckgadget.platform import neptune
+from deckgadget.platform import neptune_binding
+from deckhw.neptune import CONTROLLER_INTERFACE, find_neptune
 from deckgadget.sources import neptune_usb as N
 from fakes import FakeSysfs
 
-SET_FEATURE = (N.USB_REQTYPE_SET_CLASS_INTERFACE, N.HID_REQ_SET_REPORT, N.FEATURE_WVALUE, neptune.CONTROLLER_INTERFACE)
-GET_FEATURE = (N.USB_REQTYPE_GET_CLASS_INTERFACE, N.HID_REQ_GET_REPORT, N.FEATURE_WVALUE, neptune.CONTROLLER_INTERFACE)
+SET_FEATURE = (N.USB_REQTYPE_SET_CLASS_INTERFACE, N.HID_REQ_SET_REPORT, N.FEATURE_WVALUE, CONTROLLER_INTERFACE)
+GET_FEATURE = (N.USB_REQTYPE_GET_CLASS_INTERFACE, N.HID_REQ_GET_REPORT, N.FEATURE_WVALUE, CONTROLLER_INTERFACE)
 HEARTBEAT_TAIL = N.heartbeat_sequence()[1]
 
 
@@ -85,7 +86,7 @@ class FakeUsbfsDevice:
         return [payload for setup, payload in self.control_outs if setup == SET_FEATURE]
 
 
-class KernelBinder(neptune.UsbhidBinder):
+class KernelBinder(neptune_binding.UsbhidBinder):
     """UsbhidBinder whose writes also move the fake ``driver`` symlinks, like the kernel does."""
 
     def __init__(self, sysfs, fs):
@@ -121,14 +122,14 @@ class NeptuneSourceTest(unittest.TestCase):
             self.devices.append(device)
             return device
 
-        with mock.patch.object(neptune, "UsbhidBinder", lambda sysfs: KernelBinder(sysfs, self.fs)):
+        with mock.patch.object(neptune_binding, "UsbhidBinder", lambda sysfs: KernelBinder(sysfs, self.fs)):
             source = N.NeptuneUsbSource(sysfs=self.fs.sys, dev=self.fs.dev, heartbeat_s=heartbeat_s,
                                         device_class=factory, with_sensors=with_sensors)
         self.addCleanup(source.close)
         return source
 
     def captured(self):
-        return neptune.find_neptune(self.fs.sys, self.fs.dev).captured
+        return find_neptune(self.fs.sys, self.fs.dev).captured
 
     def test_open_captures_interfaces_claims_and_disables_lizard_mode(self):
         source = self.make_source()

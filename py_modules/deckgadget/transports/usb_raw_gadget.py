@@ -28,7 +28,7 @@ import threading
 import time
 from typing import List, Optional, Tuple
 
-from ..platform import usb_role
+from deckhw.udc import UDC_STATE_CONFIGURED, Udc, udc_names
 from ..profiles.base import (
     USB_DT_CONFIG, USB_DT_DEVICE, USB_DT_DEVICE_QUALIFIER, USB_DT_OTHER_SPEED_CONFIG, USB_DT_STRING,
     USB_RECIP_DEVICE, USB_REQ_CLEAR_FEATURE, USB_REQ_GET_CONFIGURATION, USB_REQ_GET_DESCRIPTOR,
@@ -199,7 +199,7 @@ class UsbRawGadgetTransport:
         self._in_thread: Optional[threading.Thread] = None
         self._out_thread: Optional[threading.Thread] = None
         self._error: Optional[BaseException] = None
-        self._udc_watch: Optional[usb_role.UdcWatcher] = None
+        self._udc_watch: Optional[Udc] = None
         self.control_requests = 0
         self.generation = 0
 
@@ -216,7 +216,7 @@ class UsbRawGadgetTransport:
             return False
         if self._udc_watch is not None:
             state = self._udc_watch.state()
-            if state is not None and state != usb_role.UDC_STATE_CONFIGURED:
+            if state is not None and state != UDC_STATE_CONFIGURED:
                 return False
         return True
 
@@ -234,13 +234,13 @@ class UsbRawGadgetTransport:
             raise TransportError(f"{self.dev_path} missing (modprobe raw_gadget failed?)")
         udc = self.udc
         if udc is None:
-            udc_names = usb_role.list_udcs(self.sysfs)
-            if not udc_names:
+            available = udc_names(self.sysfs)
+            if not available:
                 raise TransportError("no UDC in /sys/class/udc: DRD disabled in BIOS, or Deck is USB host (dock attached?)")
-            udc = udc_names[0]
+            udc = available[0]
         self.udc = udc
-        self._udc_watch = usb_role.UdcWatcher(udc, self.sysfs)
-        bound_function = usb_role.udc_attr("function", udc, self.sysfs)
+        self._udc_watch = Udc(self.sysfs, udc)
+        bound_function = self._udc_watch.function()
         if bound_function:
             log.warning("UDC %s already has function %r bound (stale gadget?) — trying anyway", udc, bound_function)
         try:
