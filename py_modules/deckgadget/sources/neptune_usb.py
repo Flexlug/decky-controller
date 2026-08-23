@@ -202,11 +202,11 @@ BUTTONS_H: Tuple[Tuple[int, int, str], ...] = (
     (STEAMDECK_HBUTTON_QAM, S.BTN_QAM, "QAM"),
 )
 _KNOWN_L = 0
-for _m, _c, _n in BUTTONS_L:
-    _KNOWN_L |= _m
+for _mask, _bit, _name in BUTTONS_L:
+    _KNOWN_L |= _mask
 _KNOWN_H = 0
-for _m, _c, _n in BUTTONS_H:
-    _KNOWN_H |= _m
+for _mask, _bit, _name in BUTTONS_H:
+    _KNOWN_H |= _mask
 
 # SteamDeckStatePacket_t layout (SDL: controller_structs.h, #pragma pack(1)), preceded by the
 # 4-byte ValveInReportHeader_t {u16 unReportVersion; u8 ucType; u8 ucLength}:
@@ -242,7 +242,7 @@ def cmd_clear_digital_mappings() -> bytes:
 
 def cmd_set_settings(pairs: Sequence[Tuple[int, int]]) -> bytes:
     """``ID_SET_SETTINGS_VALUES`` with ``ControllerSetting {u8 settingNum; u16 settingValue}`` triples."""
-    payload = b"".join(struct.pack("<BH", num & 0xFF, val & 0xFFFF) for num, val in pairs)
+    payload = b"".join(struct.pack("<BH", setting & 0xFF, value & 0xFFFF) for setting, value in pairs)
     return build_feature_report(ID_SET_SETTINGS_VALUES, payload)
 
 
@@ -287,15 +287,15 @@ def cmd_rumble(left: int, right: int, intensity: int = HAPTIC_INTENSITY_SYSTEM,
 # Report parser (table-driven)
 # ---------------------------------------------------------------------------------------
 
-def map_buttons(buttons_l: int, buttons_h: int) -> int:
-    canon = 0
+def map_buttons(buttons_low: int, buttons_high: int) -> int:
+    canonical = 0
     for mask, bit, _ in BUTTONS_L:
-        if buttons_l & mask:
-            canon |= bit
+        if buttons_low & mask:
+            canonical |= bit
     for mask, bit, _ in BUTTONS_H:
-        if buttons_h & mask:
-            canon |= bit
-    return canon
+        if buttons_high & mask:
+            canonical |= bit
+    return canonical
 
 
 def is_deck_state_report(data: bytes) -> bool:
@@ -303,50 +303,54 @@ def is_deck_state_report(data: bytes) -> bool:
             and struct.unpack_from("<H", data, 0)[0] == VALVE_IN_REPORT_MSG_VERSION and data[3] == REPORT_LEN)
 
 
-def parse_report(data: bytes, ts: float = 0.0, with_sensors: bool = False) -> Optional[ControllerState]:
+def parse_report(data: bytes, timestamp: float = 0.0, with_sensors: bool = False) -> Optional[ControllerState]:
     """64-byte Neptune report -> ControllerState, or ``None`` if it is not a deck-state packet."""
     if not is_deck_state_report(data):
         return None
-    (_ver, _typ, _len, packet, bl, bh,
+    (_version, _type, _length, packet, buttons_low, buttons_high,
      lpad_x, lpad_y, rpad_x, rpad_y,
-     ax, ay, az, gx, gy, gz, _qw, _qx, _qy, _qz,
-     trig_l, trig_r, lx, ly, rx, ry, press_l, press_r) = REPORT_STRUCT.unpack_from(data, 0)
-    st = ControllerState(
-        buttons=map_buttons(bl, bh),
+     ax, ay, az, gx, gy, gz, _quat_w, _quat_x, _quat_y, _quat_z,
+     trigger_left, trigger_right, lx, ly, rx, ry, pressure_left, pressure_right) = REPORT_STRUCT.unpack_from(data, 0)
+    state = ControllerState(
+        buttons=map_buttons(buttons_low, buttons_high),
         lx=lx, ly=ly, rx=rx, ry=ry,
-        lt=S.clamp_trigger(trig_l), rt=S.clamp_trigger(trig_r),
-        packet=packet, ts=ts,
+        lt=S.clamp_trigger(trigger_left), rt=S.clamp_trigger(trigger_right),
+        packet=packet, ts=timestamp,
     )
     if with_sensors:
-        st.lpad = (lpad_x, lpad_y, press_l)
-        st.rpad = (rpad_x, rpad_y, press_r)
-        st.gyro = (gx, gy, gz)
-        st.accel = (ax, ay, az)
-    return st
+        state.lpad = (lpad_x, lpad_y, pressure_left)
+        state.rpad = (rpad_x, rpad_y, pressure_right)
+        state.gyro = (gx, gy, gz)
+        state.accel = (ax, ay, az)
+    return state
 
 
 def decode_report(data: bytes) -> Dict[str, object]:
     """Verbose decode for ``deckgadget probe``: raw fields, named bits, and *unknown* set bits."""
-    out: Dict[str, object] = {"len": len(data), "hex": bytes(data).hex()}
+    decoded: Dict[str, object] = {"len": len(data), "hex": bytes(data).hex()}
     if len(data) < 4:
-        return out
-    ver = struct.unpack_from("<H", data, 0)[0]
-    out.update({"version": ver, "type": data[2], "length": data[3], "deck_state": is_deck_state_report(data)})
+        return decoded
+    version = struct.unpack_from("<H", data, 0)[0]
+    decoded.update({"version": version, "type": data[2], "length": data[3], "deck_state": is_deck_state_report(data)})
     if not is_deck_state_report(data):
-        return out
-    (_v, _t, _l, packet, bl, bh, lpx, lpy, rpx, rpy, ax, ay, az, gx, gy, gz, qw, qx, qy, qz,
-     tl, tr, lx, ly, rx, ry, pl, pr) = REPORT_STRUCT.unpack_from(data, 0)
-    names = [n for m, _, n in BUTTONS_L if bl & m] + [n for m, _, n in BUTTONS_H if bh & m]
-    unknown = [f"L:bit{i}" for i in range(32) if (bl & ~_KNOWN_L) & (1 << i)]
-    unknown += [f"H:bit{i}" for i in range(32) if (bh & ~_KNOWN_H) & (1 << i)]
-    out.update({
-        "packet": packet, "buttons_l": f"0x{bl:08x}", "buttons_h": f"0x{bh:08x}",
+        return decoded
+    (_version, _type, _length, packet, buttons_low, buttons_high,
+     lpad_x, lpad_y, rpad_x, rpad_y,
+     ax, ay, az, gx, gy, gz, quat_w, quat_x, quat_y, quat_z,
+     trigger_left, trigger_right, lx, ly, rx, ry, pressure_left, pressure_right) = REPORT_STRUCT.unpack_from(data, 0)
+    names = ([name for mask, _, name in BUTTONS_L if buttons_low & mask]
+             + [name for mask, _, name in BUTTONS_H if buttons_high & mask])
+    unknown = [f"L:bit{i}" for i in range(32) if (buttons_low & ~_KNOWN_L) & (1 << i)]
+    unknown += [f"H:bit{i}" for i in range(32) if (buttons_high & ~_KNOWN_H) & (1 << i)]
+    decoded.update({
+        "packet": packet, "buttons_l": f"0x{buttons_low:08x}", "buttons_h": f"0x{buttons_high:08x}",
         "buttons": names, "unknown_bits": unknown,
-        "lpad": (lpx, lpy, pl), "rpad": (rpx, rpy, pr), "accel": (ax, ay, az), "gyro": (gx, gy, gz),
-        "quat": (qw, qx, qy, qz), "trigger_l": tl, "trigger_r": tr,
+        "lpad": (lpad_x, lpad_y, pressure_left), "rpad": (rpad_x, rpad_y, pressure_right),
+        "accel": (ax, ay, az), "gyro": (gx, gy, gz),
+        "quat": (quat_w, quat_x, quat_y, quat_z), "trigger_l": trigger_left, "trigger_r": trigger_right,
         "lstick": (lx, ly), "rstick": (rx, ry),
     })
-    return out
+    return decoded
 
 
 # ---------------------------------------------------------------------------------------
@@ -359,8 +363,8 @@ class UsbfsDevice:
     def __init__(self, path: str) -> None:
         self.path = path
         self.fd = os.open(path, os.O_RDWR | os.O_CLOEXEC)
-        self._rbuf = ctypes.create_string_buffer(REPORT_LEN)
-        self._bulk = UsbfsBulkTransfer(0, REPORT_LEN, 0, ctypes.cast(self._rbuf, ctypes.c_void_p))
+        self._read_buffer = ctypes.create_string_buffer(REPORT_LEN)
+        self._bulk_transfer = UsbfsBulkTransfer(0, REPORT_LEN, 0, ctypes.cast(self._read_buffer, ctypes.c_void_p))
 
     def close(self) -> None:
         if self.fd >= 0:
@@ -377,49 +381,49 @@ class UsbfsDevice:
 
     def disconnect_claim(self, number: int) -> None:
         """Detach whatever kernel driver holds the interface and claim it (fallback path)."""
-        arg = UsbfsDisconnectClaim(number, 0, b"")
-        ioctl(self.fd, USBDEVFS_DISCONNECT_CLAIM, arg)
+        claim = UsbfsDisconnectClaim(number, 0, b"")
+        ioctl(self.fd, USBDEVFS_DISCONNECT_CLAIM, claim)
 
     def get_driver(self, number: int) -> Optional[str]:
-        arg = UsbfsGetDriver(number, b"")
+        query = UsbfsGetDriver(number, b"")
         try:
-            ioctl(self.fd, USBDEVFS_GETDRIVER, arg)
+            ioctl(self.fd, USBDEVFS_GETDRIVER, query)
         except OSError as exc:
             if exc.errno == errno.ENODATA:
                 return None
             raise
-        return arg.driver.decode(errors="replace")
+        return query.driver.decode(errors="replace")
 
     def control_out(self, request_type: int, request: int, value: int, index: int, data: bytes,
                     timeout_ms: int = 1000) -> int:
-        n = len(data)
-        buf = ctypes.create_string_buffer(max(1, n))
-        if n:
-            ctypes.memmove(buf, data, n)
-        ctrl = UsbfsCtrlTransfer(request_type, request, value, index, n, timeout_ms,
-                                 ctypes.cast(buf, ctypes.c_void_p))
-        return ioctl(self.fd, USBDEVFS_CONTROL, ctrl)
+        length = len(data)
+        buffer = ctypes.create_string_buffer(max(1, length))
+        if length:
+            ctypes.memmove(buffer, data, length)
+        transfer = UsbfsCtrlTransfer(request_type, request, value, index, length, timeout_ms,
+                                     ctypes.cast(buffer, ctypes.c_void_p))
+        return ioctl(self.fd, USBDEVFS_CONTROL, transfer)
 
     def control_in(self, request_type: int, request: int, value: int, index: int, length: int,
                    timeout_ms: int = 1000) -> bytes:
-        buf = ctypes.create_string_buffer(max(1, length))
-        ctrl = UsbfsCtrlTransfer(request_type | 0x80, request, value, index, length, timeout_ms,
-                                 ctypes.cast(buf, ctypes.c_void_p))
-        n = ioctl(self.fd, USBDEVFS_CONTROL, ctrl)
-        return buf.raw[:n]
+        buffer = ctypes.create_string_buffer(max(1, length))
+        transfer = UsbfsCtrlTransfer(request_type | 0x80, request, value, index, length, timeout_ms,
+                                     ctypes.cast(buffer, ctypes.c_void_p))
+        received = ioctl(self.fd, USBDEVFS_CONTROL, transfer)
+        return buffer.raw[:received]
 
-    def interrupt_in(self, ep: int, timeout_ms: int) -> Optional[bytes]:
+    def interrupt_in(self, endpoint_address: int, timeout_ms: int) -> Optional[bytes]:
         """One USBDEVFS_BULK read on an (interrupt) IN endpoint; ``None`` on timeout/EINTR."""
-        self._bulk.ep = ep
-        self._bulk.len = REPORT_LEN
-        self._bulk.timeout = timeout_ms
+        self._bulk_transfer.ep = endpoint_address
+        self._bulk_transfer.len = REPORT_LEN
+        self._bulk_transfer.timeout = timeout_ms
         try:
-            n = ioctl(self.fd, USBDEVFS_BULK, self._bulk)
+            received = ioctl(self.fd, USBDEVFS_BULK, self._bulk_transfer)
         except OSError as exc:
             if exc.errno in (errno.ETIMEDOUT, errno.EINTR, errno.EAGAIN):
                 return None
             raise
-        return self._rbuf.raw[:n]
+        return self._read_buffer.raw[:received]
 
 
 # ---------------------------------------------------------------------------------------
@@ -436,21 +440,21 @@ class NeptuneUsbSource:
     name = "neptune_usb"
 
     def __init__(self, sysfs: str = "/sys", dev: str = "/dev", heartbeat_s: float = 1.0,
-                 device_cls=UsbfsDevice, with_sensors: bool = False) -> None:
+                 device_class=UsbfsDevice, with_sensors: bool = False) -> None:
         self.sysfs = sysfs
         self.dev = dev
         self.heartbeat_s = heartbeat_s
-        self._device_cls = device_cls
+        self._device_class = device_class
         self.with_sensors = with_sensors
         self.device: Optional[neptune_mod.NeptuneDevice] = None
-        self.usb: Optional[UsbfsDevice] = None
+        self.usb_device: Optional[UsbfsDevice] = None
         self.interface = neptune_mod.CONTROLLER_INTERFACE
         self.ep_in = 0x83
         self.detached: List[str] = []
         self._binder = neptune_mod.UsbhidBinder(sysfs)
-        self._ctrl_lock = threading.Lock()
-        self._hb_stop = threading.Event()
-        self._hb_thread: Optional[threading.Thread] = None
+        self._control_lock = threading.Lock()
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: Optional[threading.Thread] = None
         self._opened = False
         self.reports = 0
         self.other_packets = 0
@@ -464,49 +468,51 @@ class NeptuneUsbSource:
         device = neptune_mod.find_neptune(self.sysfs, self.dev)
         if device is None:
             raise NeptuneError("Steam Deck controller (28de:1205) not found in sysfs")
-        itf = device.interface(self.interface)
-        if itf is None:
+        controller_interface = device.interface(self.interface)
+        if controller_interface is None:
             raise NeptuneError(f"controller interface {self.interface} not present on {device.name}")
-        ep = itf.interrupt_in()
-        if ep is None:
-            raise NeptuneError(f"no interrupt IN endpoint on {itf.name}")
-        if ep.max_packet != REPORT_LEN:
-            log.warning("unexpected wMaxPacketSize %d on ep 0x%02x (expected %d)", ep.max_packet, ep.address, REPORT_LEN)
+        endpoint = controller_interface.interrupt_in()
+        if endpoint is None:
+            raise NeptuneError(f"no interrupt IN endpoint on {controller_interface.name}")
+        if endpoint.max_packet != REPORT_LEN:
+            log.warning("unexpected wMaxPacketSize %d on ep 0x%02x (expected %d)",
+                        endpoint.max_packet, endpoint.address, REPORT_LEN)
         self.device = device
-        self.ep_in = ep.address
+        self.ep_in = endpoint.address
         log.info("neptune %s at %s, iface %d ep 0x%02x", device.name, device.devnode, self.interface, self.ep_in)
         try:
             self.detached = neptune_mod.capture_interfaces(device, self._binder)
-            self.usb = self._device_cls(device.devnode)
+            self.usb_device = self._device_class(device.devnode)
             try:
-                self.usb.claim_interface(self.interface)
+                self.usb_device.claim_interface(self.interface)
             except OSError as exc:
                 if exc.errno != errno.EBUSY:
                     raise
                 log.warning("claim iface %d busy (%s); trying USBDEVFS_DISCONNECT_CLAIM", self.interface, exc)
-                self.usb.disconnect_claim(self.interface)
+                self.usb_device.disconnect_claim(self.interface)
             self.disable_lizard_mode()
-            self._hb_stop.clear()
-            self._hb_thread = threading.Thread(target=self._heartbeat_loop, name="neptune-heartbeat", daemon=True)
-            self._hb_thread.start()
+            self._heartbeat_stop.clear()
+            self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, name="neptune-heartbeat",
+                                                      daemon=True)
+            self._heartbeat_thread.start()
             self._opened = True
         except Exception:
             self.close()
             raise
 
     def close(self) -> None:
-        self._hb_stop.set()
-        t = self._hb_thread
-        if t is not None and t is not threading.current_thread():
-            t.join(timeout=2.0)
-        self._hb_thread = None
-        usb, self.usb = self.usb, None
-        if usb is not None:
+        self._heartbeat_stop.set()
+        thread = self._heartbeat_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        self._heartbeat_thread = None
+        usb_device, self.usb_device = self.usb_device, None
+        if usb_device is not None:
             try:
-                usb.release_interface(self.interface)
+                usb_device.release_interface(self.interface)
             except OSError:
                 pass
-            usb.close()
+            usb_device.close()
         # Give the interfaces back to usbhid (all capture interfaces, not just the ones we detached:
         # a previous crashed run may have left some unbound).
         try:
@@ -520,38 +526,38 @@ class NeptuneUsbSource:
 
     # --- feature reports ------------------------------------------------------------
     def send_feature(self, report: bytes, timeout_ms: int = 1000) -> None:
-        if self.usb is None:
+        if self.usb_device is None:
             raise NeptuneError("device not open")
         if len(report) != HID_FEATURE_REPORT_BYTES:
             raise ValueError("feature report must be 64 bytes")
-        with self._ctrl_lock:
-            self.usb.control_out(USB_REQTYPE_SET_CLASS_INTERFACE, HID_REQ_SET_REPORT, FEATURE_WVALUE,
+        with self._control_lock:
+            self.usb_device.control_out(USB_REQTYPE_SET_CLASS_INTERFACE, HID_REQ_SET_REPORT, FEATURE_WVALUE,
                                  self.interface, report, timeout_ms)
 
     def get_feature(self, timeout_ms: int = 200) -> Optional[bytes]:
-        if self.usb is None:
+        if self.usb_device is None:
             return None
-        with self._ctrl_lock:
+        with self._control_lock:
             try:
-                return self.usb.control_in(USB_REQTYPE_GET_CLASS_INTERFACE, HID_REQ_GET_REPORT, FEATURE_WVALUE,
+                return self.usb_device.control_in(USB_REQTYPE_GET_CLASS_INTERFACE, HID_REQ_GET_REPORT, FEATURE_WVALUE,
                                            self.interface, HID_FEATURE_REPORT_BYTES, timeout_ms)
             except OSError:
                 return None
 
     def disable_lizard_mode(self) -> None:
-        for rep in lizard_off_sequence():
-            self.send_feature(rep)
+        for report in lizard_off_sequence():
+            self.send_feature(report)
         self.get_feature()  # SDL: "There may be a lingering report read back after changing settings."
         log.info("lizard mode disabled")
 
     def heartbeat(self) -> None:
-        for rep in heartbeat_sequence():
-            self.send_feature(rep)
+        for report in heartbeat_sequence():
+            self.send_feature(report)
         self.get_feature()
         self.heartbeats += 1
 
     def _heartbeat_loop(self) -> None:
-        while not self._hb_stop.wait(self.heartbeat_s):
+        while not self._heartbeat_stop.wait(self.heartbeat_s):
             try:
                 self.heartbeat()
             except OSError as exc:
@@ -569,21 +575,21 @@ class NeptuneUsbSource:
 
     # --- hot path -------------------------------------------------------------------
     def read(self, timeout: float) -> Optional[ControllerState]:
-        usb = self.usb
-        if usb is None:
+        usb_device = self.usb_device
+        if usb_device is None:
             raise NeptuneError("device not open")
-        data = usb.interrupt_in(self.ep_in, max(1, int(timeout * 1000)))
+        data = usb_device.interrupt_in(self.ep_in, max(1, int(timeout * 1000)))
         if data is None:
             return None
-        st = parse_report(data, time.monotonic(), self.with_sensors)
-        if st is None:
+        state = parse_report(data, time.monotonic(), self.with_sensors)
+        if state is None:
             self.other_packets += 1
             return None
         self.reports += 1
-        return st
+        return state
 
     def read_raw(self, timeout: float) -> Optional[bytes]:
-        usb = self.usb
-        if usb is None:
+        usb_device = self.usb_device
+        if usb_device is None:
             raise NeptuneError("device not open")
-        return usb.interrupt_in(self.ep_in, max(1, int(timeout * 1000)))
+        return usb_device.interrupt_in(self.ep_in, max(1, int(timeout * 1000)))

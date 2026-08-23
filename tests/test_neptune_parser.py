@@ -35,7 +35,7 @@ class ParserTest(unittest.TestCase):
         bh = N.STEAMDECK_HBUTTON_L4 | N.STEAMDECK_HBUTTON_QAM
         rep = make_report(buttons_l=bl, buttons_h=bh, packet=42, trig=(32767, 100), lstick=(-30000, 30000),
                           rstick=(12, -12), lpad=(5, 6), rpad=(7, 8), press=(9, 10), accel=(1, 2, 3), gyro=(4, 5, 6))
-        st = N.parse_report(rep, ts=1.5)
+        st = N.parse_report(rep, timestamp=1.5)
         self.assertIsNotNone(st)
         self.assertEqual(st.buttons, S.BTN_A | S.BTN_L1 | S.BTN_DPAD_LEFT | S.BTN_VIEW | S.BTN_L3 | S.BTN_R3
                          | S.BTN_L5 | S.BTN_L4 | S.BTN_QAM)

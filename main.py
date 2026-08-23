@@ -115,7 +115,7 @@ def _read_text(path: str) -> Optional[str]:
         return None
 
 
-def _tail_file(path: str, lines: int, max_bytes: int = 64 * 1024) -> list[str]:
+def _tail_file(path: str, count: int, max_bytes: int = 64 * 1024) -> list[str]:
     """Last ``lines`` lines of a text file (reads at most ``max_bytes`` from the end)."""
     try:
         with open(path, "rb") as f:
@@ -125,10 +125,10 @@ def _tail_file(path: str, lines: int, max_bytes: int = 64 * 1024) -> list[str]:
             data = f.read()
     except OSError:
         return []
-    out = data.decode("utf-8", "replace").splitlines()
-    if size > max_bytes and out:
-        out = out[1:]  # first line is almost certainly partial
-    return out[-lines:]
+    text_lines = data.decode("utf-8", "replace").splitlines()
+    if size > max_bytes and text_lines:
+        text_lines = text_lines[1:]  # first line is almost certainly partial
+    return text_lines[-count:]
 
 
 def _parse_json_object(text: str) -> Optional[JsonDict]:
@@ -136,30 +136,30 @@ def _parse_json_object(text: str) -> Optional[JsonDict]:
     text = text.strip()
     if not text:
         return None
-    obj: Any = None
+    parsed: Any = None
     try:
-        obj = json.loads(text)
+        parsed = json.loads(text)
     except ValueError:
         for line in reversed(text.splitlines()):
             line = line.strip()
             if line.startswith("{"):
                 try:
-                    obj = json.loads(line)
+                    parsed = json.loads(line)
                     break
                 except ValueError:
                     continue
-    return obj if isinstance(obj, dict) else None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _plugin_version() -> str:
-    v = getattr(decky, "DECKY_PLUGIN_VERSION", None)
-    if isinstance(v, str) and v:
-        return v
+    version = getattr(decky, "DECKY_PLUGIN_VERSION", None)
+    if isinstance(version, str) and version:
+        return version
     try:
         with open(os.path.join(decky.DECKY_PLUGIN_DIR, "package.json"), encoding="utf-8") as f:
-            v = json.load(f).get("version")
-        if isinstance(v, str) and v:
-            return v
+            version = json.load(f).get("version")
+        if isinstance(version, str) and version:
+            return version
     except Exception:
         pass
     return "0.0.0"
@@ -172,9 +172,9 @@ def _daemon_env() -> dict[str, str]:
     system python3 (decky-loader issue #756) — it must be removed. PYTHONUNBUFFERED guarantees the daemon's
     JSON-lines stdout arrives line by line.
     """
-    env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-    env["PYTHONUNBUFFERED"] = "1"
-    return env
+    environment = {key: value for key, value in os.environ.items() if key != "LD_LIBRARY_PATH"}
+    environment["PYTHONUNBUFFERED"] = "1"
+    return environment
 
 
 def _is_deckgadget_pid(pid: int) -> bool:
@@ -193,7 +193,7 @@ def _sysfs_snapshot() -> JsonDict:
     when the ``deckgadget status`` CLI is unavailable. The CLI remains the source of truth (docs/ARCHITECTURE.md);
     everything here mirrors the facts in docs/HARDWARE.md.
     """
-    snap: JsonDict = {
+    snapshot: JsonDict = {
         "kernel": os.uname().release,
         "model": _read_text("/sys/class/dmi/id/product_name"),
         "drd_enabled": False,
@@ -212,33 +212,33 @@ def _sysfs_snapshot() -> JsonDict:
     # DRD on in BIOS ⇒ PCI 04:00.3 is re-classed by the kernel and claimed by dwc3-pci; off ⇒ xhci_hcd owns it
     # and the dwc3_pci module is not even loaded, so the driver directory does not exist.
     try:
-        snap["drd_enabled"] = any(":" in e for e in os.listdir("/sys/bus/pci/drivers/dwc3-pci"))
+        snapshot["drd_enabled"] = any(":" in entry for entry in os.listdir("/sys/bus/pci/drivers/dwc3-pci"))
     except OSError:
-        snap["drd_enabled"] = False
+        snapshot["drd_enabled"] = False
     # A UDC exists only while dwc3 is in device role (Deck plugged into a host, nothing in host role).
     try:
         udcs = sorted(os.listdir("/sys/class/udc"))
     except OSError:
         udcs = []
     if udcs:
-        snap["udc_name"] = udcs[0]
-        snap["udc_state"] = _read_text(f"/sys/class/udc/{udcs[0]}/state")
-        snap["udc_speed"] = _read_text(f"/sys/class/udc/{udcs[0]}/current_speed")
-        snap["host_connected"] = snap["udc_state"] == "configured"
+        snapshot["udc_name"] = udcs[0]
+        snapshot["udc_state"] = _read_text(f"/sys/class/udc/{udcs[0]}/state")
+        snapshot["udc_speed"] = _read_text(f"/sys/class/udc/{udcs[0]}/current_speed")
+        snapshot["host_connected"] = snapshot["udc_state"] == "configured"
     # steamdeck-extcon: "USB=0\nUSB-HOST=1\nSDP=0…" — USB=1 ⇒ we are a device, USB-HOST=1 ⇒ we are a host.
     try:
         extcons = sorted(os.listdir("/sys/class/extcon"))
     except OSError:
         extcons = []
     for name in extcons:
-        txt = _read_text(f"/sys/class/extcon/{name}/state")
-        if not txt:
+        text = _read_text(f"/sys/class/extcon/{name}/state")
+        if not text:
             continue
-        for line in txt.splitlines():
-            key, sep, val = line.partition("=")
-            if sep and key.strip() in ("USB", "USB-HOST"):
+        for line in text.splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() in ("USB", "USB-HOST"):
                 try:
-                    snap["extcon"][key.strip()] = int(val.strip())
+                    snapshot["extcon"][key.strip()] = int(value.strip())
                 except ValueError:
                     pass
         break
@@ -247,7 +247,7 @@ def _sysfs_snapshot() -> JsonDict:
     # Mirrors deckgadget.platform.usb_role.classify_cable (the CLI value wins when it is available).
     online = _read_text("/sys/class/power_supply/ACAD/online")
     if online in ("0", "1"):
-        snap["cable_power"] = online == "1"
+        snapshot["cable_power"] = online == "1"
     try:
         hwmons = sorted(os.listdir("/sys/class/hwmon"))
     except OSError:
@@ -256,38 +256,39 @@ def _sysfs_snapshot() -> JsonDict:
         base = f"/sys/class/hwmon/{name}"
         if _read_text(f"{base}/name") != "steamdeck_hwmon":
             continue
-        for key, fn in (("pd_contract_mv", "in0_input"), ("pd_contract_ma", "curr1_input")):
+        for key, file_name in (("pd_contract_mv", "in0_input"), ("pd_contract_ma", "curr1_input")):
             try:
-                snap[key] = int(_read_text(f"{base}/{fn}") or "")
+                snapshot[key] = int(_read_text(f"{base}/{file_name}") or "")
             except ValueError:
-                snap[key] = None
+                snapshot[key] = None
         break
-    if snap["extcon"].get("USB-HOST") == 1:
-        snap["cable_kind"] = "host_device"
-    elif snap["cable_power"] is False:
-        snap["cable_kind"] = "none"
-    elif isinstance(snap["pd_contract_mv"], int) and snap["pd_contract_mv"] > 0:
-        snap["cable_kind"] = "pc" if snap["pd_contract_mv"] <= 5500 else "charger"
+    if snapshot["extcon"].get("USB-HOST") == 1:
+        snapshot["cable_kind"] = "host_device"
+    elif snapshot["cable_power"] is False:
+        snapshot["cable_kind"] = "none"
+    elif isinstance(snapshot["pd_contract_mv"], int) and snapshot["pd_contract_mv"] > 0:
+        snapshot["cable_kind"] = "pc" if snapshot["pd_contract_mv"] <= 5500 else "charger"
     # Built-in controller present on the USB bus (it lives on a different xHCI than the USB-C port).
     try:
-        for dev in os.listdir("/sys/bus/usb/devices"):
-            if ":" in dev or not dev[:1].isdigit():   # skip interfaces ("1-3:1.0") and root hubs ("usb1")
+        for device_name in os.listdir("/sys/bus/usb/devices"):
+            # skip interfaces ("1-3:1.0") and root hubs ("usb1")
+            if ":" in device_name or not device_name[:1].isdigit():
                 continue
-            base = f"/sys/bus/usb/devices/{dev}"
+            base = f"/sys/bus/usb/devices/{device_name}"
             if _read_text(f"{base}/idVendor") == NEPTUNE_VID and _read_text(f"{base}/idProduct") == NEPTUNE_PID:
-                snap["neptune_present"] = True
+                snapshot["neptune_present"] = True
                 break
     except OSError:
         pass
-    return snap
+    return snapshot
 
 
-def _connectivity_signature(snap: JsonDict) -> tuple:
+def _connectivity_signature(snapshot: JsonDict) -> tuple:
     """The part of the sysfs snapshot whose change should trigger a ``status`` event while idle."""
-    ext = snap.get("extcon") or {}
-    return (snap.get("drd_enabled"), snap.get("udc_name"), snap.get("udc_state"), snap.get("host_connected"),
-            snap.get("neptune_present"), ext.get("USB"), ext.get("USB-HOST"),
-            snap.get("cable_kind"), snap.get("cable_power"), snap.get("pd_contract_mv"))
+    extcon = snapshot.get("extcon") or {}
+    return (snapshot.get("drd_enabled"), snapshot.get("udc_name"), snapshot.get("udc_state"),
+            snapshot.get("host_connected"), snapshot.get("neptune_present"), extcon.get("USB"), extcon.get("USB-HOST"),
+            snapshot.get("cable_kind"), snapshot.get("cable_power"), snapshot.get("pd_contract_mv"))
 
 
 # Canonical keys of ``deckgadget status`` are the Status keys themselves (docs/ARCHITECTURE.md); a few shorter
@@ -315,34 +316,34 @@ _BOOL_STATUS_KEYS = frozenset({"drd_enabled", "host_connected", "neptune_present
 
 def _normalize_cli_status(raw: JsonDict) -> JsonDict:
     """Pick the Status fields out of the ``deckgadget status`` JSON (unknown keys are ignored)."""
-    out: JsonDict = {}
+    result: JsonDict = {}
     for key, aliases in _CLI_KEY_ALIASES.items():
         for alias in aliases:
             if alias not in raw or raw[alias] is None:
                 continue
-            val = raw[alias]
-            if isinstance(val, dict):
+            value = raw[alias]
+            if isinstance(value, dict):
                 # nested spellings: {"udc": {"name", "state"}}, {"neptune": {"present", "captured"}},
                 # {"drd": {"enabled"}}, {"extcon": {"USB": 0, "USB-HOST": 0}}
                 if key == "udc_name":
-                    out["udc_name"] = val.get("name")
-                    out["udc_state"] = val.get("state")
+                    result["udc_name"] = value.get("name")
+                    result["udc_state"] = value.get("state")
                 elif key == "neptune_present":
-                    out["neptune_present"] = bool(val.get("present"))
-                    if "captured" in val:
-                        out["neptune_captured"] = bool(val.get("captured"))
+                    result["neptune_present"] = bool(value.get("present"))
+                    if "captured" in value:
+                        result["neptune_captured"] = bool(value.get("captured"))
                 elif key == "drd_enabled":
-                    out["drd_enabled"] = bool(val.get("enabled"))
+                    result["drd_enabled"] = bool(value.get("enabled"))
                 elif key == "extcon":
-                    out["extcon"] = {str(k): v for k, v in val.items()}
+                    result["extcon"] = {str(role): flag for role, flag in value.items()}
             elif key in _BOOL_STATUS_KEYS:
-                out[key] = bool(val)
+                result[key] = bool(value)
             elif key == "extcon":
                 continue  # malformed — keep the sysfs fallback
             else:
-                out[key] = val
+                result[key] = value
             break
-    return {k: v for k, v in out.items() if v is not None}
+    return {key: value for key, value in result.items() if value is not None}
 
 
 def sanitize_settings(partial: Any, base: JsonDict) -> tuple[JsonDict, list[str]]:
@@ -351,28 +352,28 @@ def sanitize_settings(partial: Any, base: JsonDict) -> tuple[JsonDict, list[str]
     Invalid values are skipped (the previous value is kept) and reported in the returned warnings list.
     Integers are clamped to their sane range. Unknown keys are ignored silently.
     """
-    out = copy.deepcopy(base)
+    merged = copy.deepcopy(base)
     warnings: list[str] = []
     if partial is None:
-        return out, warnings
+        return merged, warnings
     if not isinstance(partial, dict):
-        return out, ["settings must be a JSON object"]
+        return merged, ["settings must be a JSON object"]
 
     def choice(key: str, allowed: tuple[str, ...]) -> None:
         if key in partial:
-            val = partial[key]
-            if isinstance(val, str) and val in allowed:
-                out[key] = val
+            value = partial[key]
+            if isinstance(value, str) and value in allowed:
+                merged[key] = value
             else:
-                warnings.append(f"{key}: {val!r} is not one of {list(allowed)}")
+                warnings.append(f"{key}: {value!r} is not one of {list(allowed)}")
 
-    def integer(key: str, lo: int, hi: int) -> None:
+    def integer(key: str, low: int, high: int) -> None:
         if key in partial:
-            val = partial[key]
-            if isinstance(val, bool) or not isinstance(val, (int, float)):
-                warnings.append(f"{key}: {val!r} is not a number")
+            value = partial[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                warnings.append(f"{key}: {value!r} is not a number")
             else:
-                out[key] = int(min(hi, max(lo, val)))
+                merged[key] = int(min(high, max(low, value)))
 
     choice("profile", PROFILES)
     choice("transport", TRANSPORTS)
@@ -381,7 +382,7 @@ def sanitize_settings(partial: Any, base: JsonDict) -> tuple[JsonDict, list[str]
     integer("touch_wake_seconds", *TOUCH_WAKE_RANGE)
     if "screen_off" in partial:
         if isinstance(partial["screen_off"], bool):
-            out["screen_off"] = partial["screen_off"]
+            merged["screen_off"] = partial["screen_off"]
         else:
             warnings.append("screen_off: must be a boolean")
     if "paddles" in partial:
@@ -389,12 +390,12 @@ def sanitize_settings(partial: Any, base: JsonDict) -> tuple[JsonDict, list[str]
         if isinstance(paddles, dict):
             for name, action in paddles.items():
                 if name in PADDLES and isinstance(action, str) and action in PADDLE_ACTIONS:
-                    out["paddles"][name] = action
+                    merged["paddles"][name] = action
                 else:
                     warnings.append(f"paddles.{name}: {action!r} is not a valid paddle action")
         else:
             warnings.append("paddles: must be an object")
-    return out, warnings
+    return merged, warnings
 
 
 def resolve_transport(profile: str, transport: str) -> str:
@@ -423,18 +424,18 @@ class SettingsStore:
                 decky.logger.warning("settings.json unreadable (%s) — using defaults", e)
             settings, warnings = sanitize_settings(data if isinstance(data, dict) else {},
                                                    copy.deepcopy(DEFAULT_SETTINGS))
-            for w in warnings:
-                decky.logger.warning("settings.json: %s (ignored)", w)
+            for warning in warnings:
+                decky.logger.warning("settings.json: %s (ignored)", warning)
             self._cached = settings
         return copy.deepcopy(self._cached)
 
     def save(self, settings: JsonDict) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        tmp = f"{self.path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        temp_path = f"{self.path}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2, sort_keys=True)
             f.write("\n")
-        os.replace(tmp, self.path)  # atomic on the same filesystem
+        os.replace(temp_path, self.path)  # atomic on the same filesystem
         self._cached = copy.deepcopy(settings)
 
     def update(self, partial: Any) -> tuple[JsonDict, list[str]]:
@@ -459,11 +460,11 @@ class _Backend:
         self.settings = SettingsStore(os.path.join(self.settings_dir, "settings.json"))
 
         # daemon process
-        self.proc: Optional[asyncio.subprocess.Process] = None
-        self.proc_task: Optional[asyncio.Task[None]] = None
-        self.proc_args: list[str] = []
-        self.proc_started_at: Optional[float] = None
-        self.proc_exit_code: Optional[int] = None
+        self.process: Optional[asyncio.subprocess.Process] = None
+        self.process_task: Optional[asyncio.Task[None]] = None
+        self.process_args: list[str] = []
+        self.process_started_at: Optional[float] = None
+        self.process_exit_code: Optional[int] = None
         self.stop_requested = False
         self.first_event = asyncio.Event()  # set by the first daemon event or by its exit
 
@@ -479,9 +480,9 @@ class _Backend:
         self.output: collections.deque[str] = collections.deque(maxlen=OUTPUT_RING_SIZE)
 
         # serialization + caches
-        self.op_lock = asyncio.Lock()      # start / stop / recover never overlap
+        self.operation_lock = asyncio.Lock()      # start / stop / recover never overlap
         self.cli_lock = asyncio.Lock()     # one ``deckgadget status`` at a time
-        self.cli_cache_ts = 0.0
+        self.cli_cache_time = 0.0
         self.cli_cache: Optional[JsonDict] = None
         self.cli_error: Optional[str] = None
         self.last_recover: Optional[JsonDict] = None
@@ -489,15 +490,15 @@ class _Backend:
 
     # ---- lifecycle ------------------------------------------------------------------------------------
     async def startup(self) -> None:
-        for d in (self.settings_dir, self.runtime_dir, self.log_dir):
+        for directory in (self.settings_dir, self.runtime_dir, self.log_dir):
             try:
-                os.makedirs(d, exist_ok=True)
+                os.makedirs(directory, exist_ok=True)
             except OSError as e:
-                decky.logger.warning("cannot create %s: %s", d, e)
+                decky.logger.warning("cannot create %s: %s", directory, e)
         # Hold op_lock for the whole load-time rollback: a start() arriving while the (up to 30 s)
         # recover is still running must wait, otherwise recover would rebind usbhid / remove the gadget
         # underneath the freshly spawned daemon.
-        async with self.op_lock:
+        async with self.operation_lock:
             await self._kill_stale_daemon()
             await self._recover("plugin-load")   # a previous backend instance may have died mid-session
         if self.status_task is None or self.status_task.done():
@@ -515,7 +516,7 @@ class _Backend:
 
     # ---- daemon control -------------------------------------------------------------------------------
     def daemon_alive(self) -> bool:
-        return self.proc is not None and self.proc.returncode is None
+        return self.process is not None and self.process.returncode is None
 
     def _daemon_args(self, settings: JsonDict, profile: str) -> list[str]:
         """CLI arguments for ``deckgadget run`` (docs/ARCHITECTURE.md)."""
@@ -528,7 +529,7 @@ class _Backend:
         if settings["screen_off"]:
             args.append("--screen-off")
         args += ["--touch-wake-seconds", str(int(settings["touch_wake_seconds"]))]
-        args += ["--paddles", ",".join(f"{p}={settings['paddles'].get(p, 'none')}" for p in PADDLES)]
+        args += ["--paddles", ",".join(f"{paddle}={settings['paddles'].get(paddle, 'none')}" for paddle in PADDLES)]
         args += ["--log-file", self.daemon_log_path]
         return args
 
@@ -542,20 +543,21 @@ class _Backend:
         self.screen_off = None
 
     async def start(self, profile: Optional[str]) -> JsonDict:
-        async with self.op_lock:
+        async with self.operation_lock:
             settings = self.settings.load()
             if not profile:
                 profile = str(settings["profile"])
             if profile not in PROFILES:
                 raise ValueError(f"unknown profile {profile!r} (expected one of {list(PROFILES)})")
             if self.daemon_alive():
-                assert self.proc is not None
-                decky.logger.info("start(%s): daemon already running (pid %s) — nothing to do", profile, self.proc.pid)
+                assert self.process is not None
+                decky.logger.info("start(%s): daemon already running (pid %s) — nothing to do",
+                                  profile, self.process.pid)
                 return await self.build_status()
             if not os.path.isdir(self.py_modules_dir):
                 raise FileNotFoundError(f"daemon package directory missing: {self.py_modules_dir}")
-            for d in (self.runtime_dir, self.log_dir):
-                os.makedirs(d, exist_ok=True)
+            for directory in (self.runtime_dir, self.log_dir):
+                os.makedirs(directory, exist_ok=True)
 
             args = self._daemon_args(settings, profile)
             self._reset_session()
@@ -563,15 +565,15 @@ class _Backend:
             self.transport = resolve_transport(profile, str(settings["transport"]))
             self.last_error = None
             self.last_kill = None
-            self.proc_exit_code = None
+            self.process_exit_code = None
             self.stop_requested = False
             self.first_event = asyncio.Event()
             self.output.clear()
 
-            cmd = [PYTHON_BIN, "-m", DAEMON_MODULE, "run", *args]
-            decky.logger.info("starting daemon: %s", " ".join(cmd))
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
+            command = [PYTHON_BIN, "-m", DAEMON_MODULE, "run", *args]
+            decky.logger.info("starting daemon: %s", " ".join(command))
+            process = await asyncio.create_subprocess_exec(
+                *command,
                 cwd=self.py_modules_dir,
                 env=_daemon_env(),
                 stdin=asyncio.subprocess.DEVNULL,
@@ -580,11 +582,11 @@ class _Backend:
                 limit=SUBPROCESS_LINE_LIMIT,
                 start_new_session=True,   # own process group: its lifetime is managed here, not by signals
             )
-            self.proc = proc
-            self.proc_args = args
-            self.proc_started_at = time.time()
-            self._write_pidfile(proc.pid)
-            self.proc_task = asyncio.create_task(self._supervise(proc), name="deckgadget-supervisor")
+            self.process = process
+            self.process_args = args
+            self.process_started_at = time.time()
+            self._write_pidfile(process.pid)
+            self.process_task = asyncio.create_task(self._supervise(process), name="deckgadget-supervisor")
 
         # Outside the lock (a fast-failing daemon needs the lock for its rollback): give the daemon a moment
         # to report its first state so the caller gets something meaningful back.
@@ -598,29 +600,29 @@ class _Backend:
 
     async def stop(self, reason: str = "user") -> JsonDict:
         """Idempotent full rollback: stop the daemon (if any), then always ``deckgadget recover``."""
-        async with self.op_lock:
+        async with self.operation_lock:
             self.stop_requested = True
-            proc, task = self.proc, self.proc_task
-            if proc is not None and proc.returncode is None:
-                decky.logger.info("stop(%s): SIGTERM → daemon pid %s", reason, proc.pid)
+            process, task = self.process, self.process_task
+            if process is not None and process.returncode is None:
+                decky.logger.info("stop(%s): SIGTERM → daemon pid %s", reason, process.pid)
                 self.session_state = "STOPPING"
                 try:
-                    proc.terminate()
+                    process.terminate()
                 except ProcessLookupError:
                     pass
                 try:
-                    await asyncio.wait_for(proc.wait(), STOP_TERM_GRACE_S)
+                    await asyncio.wait_for(process.wait(), STOP_TERM_GRACE_S)
                 except asyncio.TimeoutError:
                     decky.logger.warning("daemon pid %s ignored SIGTERM for %.0fs — SIGKILL",
-                                         proc.pid, STOP_TERM_GRACE_S)
+                                         process.pid, STOP_TERM_GRACE_S)
                     try:
-                        proc.kill()
+                        process.kill()
                     except ProcessLookupError:
                         pass
                     try:
-                        await asyncio.wait_for(proc.wait(), STOP_KILL_GRACE_S)
+                        await asyncio.wait_for(process.wait(), STOP_KILL_GRACE_S)
                     except asyncio.TimeoutError:
-                        decky.logger.error("daemon pid %s did not die after SIGKILL", proc.pid)
+                        decky.logger.error("daemon pid %s did not die after SIGKILL", process.pid)
             if task is not None and not task.done():
                 # let the supervisor drain the remaining output; never cancel it (it must not be left half-way)
                 try:
@@ -633,37 +635,37 @@ class _Backend:
         await self._emit("status", status)
         return status
 
-    async def _supervise(self, proc: asyncio.subprocess.Process) -> None:
+    async def _supervise(self, process: asyncio.subprocess.Process) -> None:
         """Pump stdout/stderr until the daemon exits, then roll back unless stop() is doing it."""
         try:
-            await asyncio.gather(self._pump_stdout(proc), self._pump_stderr(proc))
+            await asyncio.gather(self._pump_stdout(process), self._pump_stderr(process))
         except Exception:
             decky.logger.exception("daemon output pump failed")
-        rc = await proc.wait()
-        self.proc_exit_code = rc
+        exit_code = await process.wait()
+        self.process_exit_code = exit_code
         self._remove_pidfile()
-        if self.proc is proc:
-            self.proc = None
+        if self.process is process:
+            self.process = None
         requested = self.stop_requested
-        decky.logger.info("daemon pid %s exited with code %s (%s)", proc.pid, rc,
+        decky.logger.info("daemon pid %s exited with code %s (%s)", process.pid, exit_code,
                           "requested" if requested else "unexpected")
         self.first_event.set()
         if requested:
             return  # stop() owns the rollback and the status refresh
         self._reset_session()
-        if rc != 0:
-            body = self.last_error or f"daemon exited with code {rc} — see the Decky log"
+        if exit_code != 0:
+            body = self.last_error or f"daemon exited with code {exit_code} — see the Decky log"
             await self._toast("Controller mode failed", body, "error")
-        async with self.op_lock:
+        async with self.operation_lock:
             if not self.daemon_alive():   # a newer session may already be running — never roll that one back
-                await self._recover(f"daemon-exit rc={rc}")
+                await self._recover(f"daemon-exit rc={exit_code}")
         await self.emit_status(force=True)
 
-    async def _pump_stdout(self, proc: asyncio.subprocess.Process) -> None:
-        assert proc.stdout is not None
+    async def _pump_stdout(self, process: asyncio.subprocess.Process) -> None:
+        assert process.stdout is not None
         while True:
             try:
-                raw = await proc.stdout.readline()
+                raw = await process.stdout.readline()
             except ValueError:   # line longer than SUBPROCESS_LINE_LIMIT — asyncio drops it, keep going
                 decky.logger.warning("daemon stdout: over-long line skipped")
                 continue
@@ -684,11 +686,11 @@ class _Backend:
                 except Exception:
                     decky.logger.exception("error handling daemon event %r", event)
 
-    async def _pump_stderr(self, proc: asyncio.subprocess.Process) -> None:
-        assert proc.stderr is not None
+    async def _pump_stderr(self, process: asyncio.subprocess.Process) -> None:
+        assert process.stderr is not None
         while True:
             try:
-                raw = await proc.stderr.readline()
+                raw = await process.stderr.readline()
             except ValueError:
                 continue
             if not raw:
@@ -720,9 +722,9 @@ class _Backend:
             await self.emit_status()
         elif kind == "metrics":
             for key in ("hz", "reports", "dropped"):
-                val = event.get(key)
-                if isinstance(val, (int, float)) and not isinstance(val, bool):
-                    self.metrics[key] = val
+                value = event.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    self.metrics[key] = value
             # the periodic status loop (every 2 s) carries metrics to the UI — no emit here
         elif kind == "kill":
             reason = str(event.get("reason") or "unknown")
@@ -745,7 +747,7 @@ class _Backend:
     # ---- rollback / CLI -------------------------------------------------------------------------------
     async def _run_cli(self, *args: str, timeout: float) -> tuple[Optional[int], str, str]:
         """Run ``python3 -m deckgadget <args>`` → (returncode, stdout, stderr); raises TimeoutError."""
-        proc = await asyncio.create_subprocess_exec(
+        process = await asyncio.create_subprocess_exec(
             PYTHON_BIN, "-m", DAEMON_MODULE, *args,
             cwd=self.py_modules_dir,
             env=_daemon_env(),
@@ -755,15 +757,15 @@ class _Backend:
             limit=SUBPROCESS_LINE_LIMIT,
         )
         try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout)
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
         except asyncio.TimeoutError:
             try:
-                proc.kill()
+                process.kill()
             except ProcessLookupError:
                 pass
-            await proc.wait()
+            await process.wait()
             raise TimeoutError(f"deckgadget {args[0]} timed out after {timeout:g}s") from None
-        return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+        return process.returncode, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
 
     async def _recover(self, reason: str) -> bool:
         """``deckgadget recover`` — idempotent full rollback (gadget down, Neptune back to usbhid, backlight).
@@ -772,26 +774,26 @@ class _Backend:
         ``errors``), so a Deck left without its controller is surfaced as a toast + ``last_error``.
         """
         decky.logger.info("recover (%s)", reason)
-        rc: Optional[int]
+        exit_code: Optional[int]
         try:
-            rc, out, err = await self._run_cli("recover", timeout=RECOVER_TIMEOUT_S)
+            exit_code, stdout, stderr = await self._run_cli("recover", timeout=RECOVER_TIMEOUT_S)
         except Exception as e:
-            rc, out, err = None, "", f"{type(e).__name__}: {e}"
-        report = _parse_json_object(out)
-        report_errors = [str(x) for x in report.get("errors") or []] if report is not None else []
+            exit_code, stdout, stderr = None, "", f"{type(e).__name__}: {e}"
+        report = _parse_json_object(stdout)
+        report_errors = [str(item) for item in report.get("errors") or []] if report is not None else []
         report_ok = bool(report.get("ok")) and not report_errors if report is not None else False
-        self.last_recover = {"ts": time.time(), "reason": reason, "rc": rc, "ok": report_ok,
-                             "errors": report_errors, "stdout": out[-2000:], "stderr": err[-2000:]}
-        if rc == 0 and report_ok:
+        self.last_recover = {"ts": time.time(), "reason": reason, "rc": exit_code, "ok": report_ok,
+                             "errors": report_errors, "stdout": stdout[-2000:], "stderr": stderr[-2000:]}
+        if exit_code == 0 and report_ok:
             decky.logger.info("recover ok")
             return True
         if report_errors:
             detail = "; ".join(report_errors)
-        elif rc != 0:
-            detail = f"'deckgadget recover' exited with {rc}: {(err or out).strip()[-300:]}"
+        elif exit_code != 0:
+            detail = f"'deckgadget recover' exited with {exit_code}: {(stderr or stdout).strip()[-300:]}"
         else:
             detail = "'deckgadget recover' printed no JSON report"
-        decky.logger.error("recover failed (rc=%s ok=%s): %s", rc, report_ok, detail[:500])
+        decky.logger.error("recover failed (rc=%s ok=%s): %s", exit_code, report_ok, detail[:500])
         self.last_error = f"Controller recovery failed: {detail}"[:500]
         await self._toast("Controller recovery failed",
                           f"{detail[:200]}. Press Stop again or reboot the Deck — a reboot always restores "
@@ -802,29 +804,31 @@ class _Backend:
         """Cached ``deckgadget status`` JSON (spawned at most once per STATUS_CACHE_TTL_S unless forced)."""
         async with self.cli_lock:
             now = time.monotonic()
-            if not force and self.cli_cache_ts and now - self.cli_cache_ts < STATUS_CACHE_TTL_S:
+            if not force and self.cli_cache_time and now - self.cli_cache_time < STATUS_CACHE_TTL_S:
                 return self.cli_cache, self.cli_error
             data: Optional[JsonDict] = None
-            err: Optional[str] = None
+            error: Optional[str] = None
             try:
-                rc, out, stderr = await self._run_cli("status", timeout=STATUS_CLI_TIMEOUT_S)
-                data = _parse_json_object(out)
+                exit_code, stdout, stderr = await self._run_cli("status", timeout=STATUS_CLI_TIMEOUT_S)
+                data = _parse_json_object(stdout)
                 if data is None:
-                    tail = stderr.strip().splitlines()[-1] if stderr.strip() else ""
-                    err = f"deckgadget status (rc={rc}) printed no JSON object" + (f": {tail}" if tail else "")
+                    last_stderr_line = stderr.strip().splitlines()[-1] if stderr.strip() else ""
+                    error = f"deckgadget status (rc={exit_code}) printed no JSON object"
+                    if last_stderr_line:
+                        error += f": {last_stderr_line}"
             except Exception as e:
-                err = f"deckgadget status failed: {type(e).__name__}: {e}"
-            if err and err != self.cli_error:
-                decky.logger.warning("%s — using sysfs fallback", err)
-            self.cli_cache_ts = time.monotonic()
-            self.cli_cache, self.cli_error = data, err
-            return data, err
+                error = f"deckgadget status failed: {type(e).__name__}: {e}"
+            if error and error != self.cli_error:
+                decky.logger.warning("%s — using sysfs fallback", error)
+            self.cli_cache_time = time.monotonic()
+            self.cli_cache, self.cli_error = data, error
+            return data, error
 
     # ---- status ---------------------------------------------------------------------------------------
     async def build_status(self, force: bool = False) -> JsonDict:
         """Status dict per docs/ARCHITECTURE.md: hardware facts from the CLI (sysfs fallback) + daemon session."""
-        cli, cli_err = await self._cli_status(force)
-        snap = _sysfs_snapshot()
+        cli_status, cli_error = await self._cli_status(force)
+        snapshot = _sysfs_snapshot()
         settings = self.settings.load()
         running = self.daemon_alive()
         state = self.session_state if running else "IDLE"
@@ -832,28 +836,28 @@ class _Backend:
         status: JsonDict = {
             "ok": True,
             "plugin_version": self.version,
-            "kernel": snap["kernel"],
-            "model": snap["model"],
-            "drd_enabled": snap["drd_enabled"],
-            "udc_name": snap["udc_name"],
-            "udc_state": snap["udc_state"],
-            "udc_speed": snap["udc_speed"],
-            "extcon": dict(snap["extcon"]),
-            "host_connected": snap["host_connected"],
-            "neptune_present": snap["neptune_present"],
+            "kernel": snapshot["kernel"],
+            "model": snapshot["model"],
+            "drd_enabled": snapshot["drd_enabled"],
+            "udc_name": snapshot["udc_name"],
+            "udc_state": snapshot["udc_state"],
+            "udc_speed": snapshot["udc_speed"],
+            "extcon": dict(snapshot["extcon"]),
+            "host_connected": snapshot["host_connected"],
+            "neptune_present": snapshot["neptune_present"],
             "neptune_captured": False,
             # what the port physically sees while idle (the CLI's values replace these when available)
-            "cable_power": snap["cable_power"],
-            "pd_contract_mv": snap["pd_contract_mv"],
-            "pd_contract_ma": snap["pd_contract_ma"],
-            "cable_kind": snap["cable_kind"],
+            "cable_power": snapshot["cable_power"],
+            "pd_contract_mv": snapshot["pd_contract_mv"],
+            "pd_contract_ma": snapshot["pd_contract_ma"],
+            "cable_kind": snapshot["cable_kind"],
         }
-        if cli:
-            status.update(_normalize_cli_status(cli))
+        if cli_status:
+            status.update(_normalize_cli_status(cli_status))
         status.update({
             "neptune_captured": bool(status.get("neptune_captured")) or (running and state in CAPTURED_STATES),
             "daemon_running": running,
-            "daemon_pid": self.proc.pid if running and self.proc is not None else None,
+            "daemon_pid": self.process.pid if running and self.process is not None else None,
             "session_state": state,
             "session_detail": self.session_detail if running else "",
             "active_profile": self.active_profile if running else None,
@@ -863,7 +867,7 @@ class _Backend:
                            else bool(settings["screen_off"]) and state in CAPTURED_STATES) if running else False,
             "last_error": self.last_error,
             "metrics": dict(self.metrics),
-            "status_error": cli_err,   # non-null ⇒ hardware fields came from the sysfs fallback
+            "status_error": cli_error,   # non-null ⇒ hardware fields came from the sysfs fallback
         })
         return status
 
@@ -875,16 +879,16 @@ class _Backend:
 
     async def _status_loop(self) -> None:
         """Every 2 s while the daemon runs; while idle, poll sysfs every 5 s and emit only on a change."""
-        last_sig: Optional[tuple] = None
+        last_signature: Optional[tuple] = None
         while True:
             try:
                 if self.daemon_alive():
                     await self.emit_status()
                     await asyncio.sleep(STATUS_PERIOD_RUNNING_S)
                 else:
-                    sig = _connectivity_signature(_sysfs_snapshot())
-                    if sig != last_sig:
-                        last_sig = sig
+                    signature = _connectivity_signature(_sysfs_snapshot())
+                    if signature != last_signature:
+                        last_signature = signature
                         await self.emit_status(force=True)
                     await asyncio.sleep(STATUS_PERIOD_IDLE_S)
             except asyncio.CancelledError:
@@ -909,10 +913,10 @@ class _Backend:
             "settings": self.settings.load(),
             "daemon": {
                 "running": self.daemon_alive(),
-                "pid": self.proc.pid if self.daemon_alive() and self.proc is not None else None,
-                "args": list(self.proc_args),
-                "started_at": self.proc_started_at,
-                "exit_code": self.proc_exit_code,
+                "pid": self.process.pid if self.daemon_alive() and self.process is not None else None,
+                "args": list(self.process_args),
+                "started_at": self.process_started_at,
+                "exit_code": self.process_exit_code,
                 "stop_requested": self.stop_requested,
                 "last_kill": self.last_kill,
             },
@@ -956,11 +960,11 @@ class _Backend:
 
     async def _kill_stale_daemon(self) -> None:
         """A daemon left behind by a previous backend instance (Decky restart/crash) must go before recover."""
-        txt = _read_text(self.pidfile)
-        if not txt:
+        text = _read_text(self.pidfile)
+        if not text:
             return
         try:
-            pid = int(txt)
+            pid = int(text)
         except ValueError:
             self._remove_pidfile()
             return
@@ -968,9 +972,9 @@ class _Backend:
             self._remove_pidfile()
             return
         decky.logger.warning("stale deckgadget daemon (pid %d) from a previous session — terminating", pid)
-        for sig, grace in ((signal.SIGTERM, STOP_TERM_GRACE_S), (signal.SIGKILL, STOP_KILL_GRACE_S)):
+        for signal_number, grace in ((signal.SIGTERM, STOP_TERM_GRACE_S), (signal.SIGKILL, STOP_KILL_GRACE_S)):
             try:
-                os.kill(pid, sig)
+                os.kill(pid, signal_number)
             except ProcessLookupError:
                 break
             deadline = time.monotonic() + grace
@@ -991,13 +995,13 @@ def _backend() -> _Backend:
     return _BACKEND
 
 
-def _error(e: BaseException, **extra: Any) -> JsonDict:
+def _error(error: BaseException, **extra: Any) -> JsonDict:
     """Uniform error answer for callables; expected (validation / missing file) errors log without a traceback."""
-    if isinstance(e, (ValueError, FileNotFoundError, TimeoutError)):
-        decky.logger.error("callable failed: %s: %s", type(e).__name__, e)
+    if isinstance(error, (ValueError, FileNotFoundError, TimeoutError)):
+        decky.logger.error("callable failed: %s: %s", type(error).__name__, error)
     else:
-        decky.logger.exception("callable failed: %s", e)
-    return {"ok": False, "error": str(e) or type(e).__name__, **extra}
+        decky.logger.exception("callable failed: %s", error)
+    return {"ok": False, "error": str(error) or type(error).__name__, **extra}
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -1040,8 +1044,8 @@ class Plugin:
     async def set_settings(self, settings: Optional[JsonDict] = None) -> JsonDict:
         try:
             merged, warnings = _backend().settings.update(settings if settings is not None else {})
-            for w in warnings:
-                decky.logger.warning("set_settings: %s (ignored)", w)
+            for warning in warnings:
+                decky.logger.warning("set_settings: %s (ignored)", warning)
             result: JsonDict = {"ok": True, **merged}
             if warnings:
                 result["warnings"] = warnings
@@ -1057,11 +1061,11 @@ class Plugin:
 
     # ---- Decky lifecycle ------------------------------------------------------------------------------
     async def _main(self) -> None:
-        b = _backend()
+        backend = _backend()
         decky.logger.info("%s %s backend starting (python %s, plugin dir %s)",
-                          PLUGIN_NAME, b.version, sys.version.split()[0], b.plugin_dir)
+                          PLUGIN_NAME, backend.version, sys.version.split()[0], backend.plugin_dir)
         try:
-            await b.startup()
+            await backend.startup()
         except Exception:
             decky.logger.exception("backend startup failed")
 

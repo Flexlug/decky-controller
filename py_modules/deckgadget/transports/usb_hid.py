@@ -113,9 +113,9 @@ class UsbHidTransport:
 
     def stop(self) -> None:
         self._stop.set()
-        for t in (self._writer, self._reader):
-            if t is not None and t.is_alive() and t is not threading.current_thread():
-                t.join(timeout=1.0)
+        for thread in (self._writer, self._reader):
+            if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=1.0)
         self._writer = self._reader = None
         fd, self._fd = self._fd, -1
         if fd >= 0:
@@ -138,50 +138,50 @@ class UsbHidTransport:
                 raise TransportError(f"{self.configfs}/usb_gadget missing (configfs not mounted / libcomposite?)")
 
     def _build_gadget(self, hid: HidFunction, udc: str) -> None:
-        g = self.gadget_dir
-        os.makedirs(g, exist_ok=True)
-        write_text(os.path.join(g, "idVendor"), f"0x{hid.vid:04x}")
-        write_text(os.path.join(g, "idProduct"), f"0x{hid.pid:04x}")
-        write_text(os.path.join(g, "bcdDevice"), "0x0100")
-        write_text(os.path.join(g, "bcdUSB"), "0x0200")
-        strings = os.path.join(g, "strings", LANG)
-        os.makedirs(strings, exist_ok=True)
-        write_text(os.path.join(strings, "serialnumber"), hid.serial)
-        write_text(os.path.join(strings, "manufacturer"), hid.manufacturer)
-        write_text(os.path.join(strings, "product"), hid.product)
-        cfg = os.path.join(g, "configs", CONFIG_NAME)
-        os.makedirs(os.path.join(cfg, "strings", LANG), exist_ok=True)
-        write_text(os.path.join(cfg, "strings", LANG, "configuration"), "Config 1")
-        write_text(os.path.join(cfg, "MaxPower"), "250")
-        fn = os.path.join(g, "functions", FUNCTION_NAME)
-        os.makedirs(fn, exist_ok=True)
-        write_text(os.path.join(fn, "protocol"), str(hid.protocol))
-        write_text(os.path.join(fn, "subclass"), str(hid.subclass))
-        write_text(os.path.join(fn, "report_length"), str(hid.report_length))
-        write_bytes(os.path.join(fn, "report_desc"), bytes(hid.report_desc))
-        link = os.path.join(cfg, FUNCTION_NAME)
+        gadget_dir = self.gadget_dir
+        os.makedirs(gadget_dir, exist_ok=True)
+        write_text(os.path.join(gadget_dir, "idVendor"), f"0x{hid.vid:04x}")
+        write_text(os.path.join(gadget_dir, "idProduct"), f"0x{hid.pid:04x}")
+        write_text(os.path.join(gadget_dir, "bcdDevice"), "0x0100")
+        write_text(os.path.join(gadget_dir, "bcdUSB"), "0x0200")
+        strings_dir = os.path.join(gadget_dir, "strings", LANG)
+        os.makedirs(strings_dir, exist_ok=True)
+        write_text(os.path.join(strings_dir, "serialnumber"), hid.serial)
+        write_text(os.path.join(strings_dir, "manufacturer"), hid.manufacturer)
+        write_text(os.path.join(strings_dir, "product"), hid.product)
+        config_dir = os.path.join(gadget_dir, "configs", CONFIG_NAME)
+        os.makedirs(os.path.join(config_dir, "strings", LANG), exist_ok=True)
+        write_text(os.path.join(config_dir, "strings", LANG, "configuration"), "Config 1")
+        write_text(os.path.join(config_dir, "MaxPower"), "250")
+        function_dir = os.path.join(gadget_dir, "functions", FUNCTION_NAME)
+        os.makedirs(function_dir, exist_ok=True)
+        write_text(os.path.join(function_dir, "protocol"), str(hid.protocol))
+        write_text(os.path.join(function_dir, "subclass"), str(hid.subclass))
+        write_text(os.path.join(function_dir, "report_length"), str(hid.report_length))
+        write_bytes(os.path.join(function_dir, "report_desc"), bytes(hid.report_desc))
+        link = os.path.join(config_dir, FUNCTION_NAME)
         if not os.path.lexists(link):
-            os.symlink(fn, link)
-        write_text(os.path.join(g, "UDC"), udc)
+            os.symlink(function_dir, link)
+        write_text(os.path.join(gadget_dir, "UDC"), udc)
 
     def _find_hidg_node(self, timeout: float = 2.0) -> str:
         """Map ``functions/hid.usb0/dev`` (``major:minor``) to ``/dev/hidgN``."""
         dev_attr = os.path.join(self.gadget_dir, "functions", FUNCTION_NAME, "dev")
         deadline = time.monotonic() + timeout
-        want = None
+        wanted_rdev = None
         while time.monotonic() < deadline:
             try:
                 with open(dev_attr, "r", encoding="utf-8") as f:
-                    major, minor = (int(x) for x in f.read().strip().split(":"))
-                want = os.makedev(major, minor)
+                    major, minor = (int(part) for part in f.read().strip().split(":"))
+                wanted_rdev = os.makedev(major, minor)
             except (OSError, ValueError):
-                want = None
+                wanted_rdev = None
             try:
                 for entry in sorted(os.listdir(self.dev)):
                     if not entry.startswith("hidg"):
                         continue
                     path = os.path.join(self.dev, entry)
-                    if want is None or os.stat(path).st_rdev == want:
+                    if wanted_rdev is None or os.stat(path).st_rdev == wanted_rdev:
                         return path
             except OSError:
                 pass
@@ -224,10 +224,10 @@ class UsbHidTransport:
         size = self.hid.report_length if self.hid else 64
         while not self._stop.is_set():
             try:
-                r, _, _ = select.select([fd], [], [], 0.25)
+                readable, _, _ = select.select([fd], [], [], 0.25)
             except (OSError, ValueError):
                 break
-            if not r:
+            if not readable:
                 continue
             try:
                 data = os.read(fd, max(size, 64))
@@ -243,12 +243,12 @@ class UsbHidTransport:
                 continue
             self._metrics.out_reports += 1
             try:
-                fb = profile.on_output(data)
+                feedback = profile.on_output(data)
             except Exception as exc:  # noqa: BLE001
                 log.warning("on_output failed: %s", exc)
                 continue
-            if fb is not None and self.on_feedback is not None:
+            if feedback is not None and self.on_feedback is not None:
                 try:
-                    self.on_feedback(fb)
+                    self.on_feedback(feedback)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("feedback callback failed: %s", exc)

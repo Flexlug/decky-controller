@@ -31,15 +31,15 @@ def setup_logging(level: int = logging.INFO, log_file: Optional[str] = None) -> 
         return log
     log.setLevel(level)
     log.propagate = False
-    fmt = logging.Formatter("%(asctime)s %(levelname).1s %(name)s: %(message)s", "%H:%M:%S")
-    sh = logging.StreamHandler(sys.stderr)
-    sh.setFormatter(fmt)
-    log.addHandler(sh)
+    formatter = logging.Formatter("%(asctime)s %(levelname).1s %(name)s: %(message)s", "%H:%M:%S")
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+    log.addHandler(stream_handler)
     if log_file:
         try:
-            fh = logging.FileHandler(log_file)
-            fh.setFormatter(fmt)
-            log.addHandler(fh)
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            log.addHandler(file_handler)
         except OSError as exc:  # never let logging setup kill the daemon
             log.warning("cannot open log file %s: %s", log_file, exc)
     log._deckgadget_configured = True  # type: ignore[attr-defined]
@@ -57,10 +57,10 @@ class JsonEventSink:
         self._stream = stream if stream is not None else sys.stdout
         self._lock = threading.Lock()
 
-    def emit(self, ev: str, **fields: Any) -> None:
-        rec = {"ev": ev, "ts": round(time.time(), 3)}
-        rec.update(fields)
-        line = json.dumps(rec, separators=(",", ":"), ensure_ascii=False)
+    def emit(self, event: str, **fields: Any) -> None:
+        record = {"ev": event, "ts": round(time.time(), 3)}
+        record.update(fields)
+        line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
         with self._lock:
             try:
                 self._stream.write(line + "\n")
@@ -74,8 +74,8 @@ class JsonEventSink:
     def state(self, state: str, detail: str = "") -> None:
         self.emit("state", state=state, detail=detail)
 
-    def error(self, msg: str) -> None:
-        self.emit("error", msg=msg)
+    def error(self, message: str) -> None:
+        self.emit("error", msg=message)
 
     def metrics(self, hz: float, reports: int, dropped: int, **extra: Any) -> None:
         self.emit("metrics", hz=round(hz, 1), reports=reports, dropped=dropped, **extra)
@@ -95,7 +95,7 @@ class NullEventSink(JsonEventSink):
         super().__init__(stream=None)
         self.events: list = []
 
-    def emit(self, ev: str, **fields: Any) -> None:  # type: ignore[override]
-        rec = {"ev": ev}
-        rec.update(fields)
-        self.events.append(rec)
+    def emit(self, event: str, **fields: Any) -> None:  # type: ignore[override]
+        record = {"ev": event}
+        record.update(fields)
+        self.events.append(record)

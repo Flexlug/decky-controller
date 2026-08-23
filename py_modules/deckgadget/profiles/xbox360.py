@@ -94,7 +94,7 @@ SECURITY_STRING = "Xbox Security Method 3, Version 1.00, © 2005 Microsoft Corpo
 
 DESCRIPTORS = GadgetDescriptors(
     vid=VID, pid=PID, bcd_device=BCD_DEVICE, bcd_usb=0x0200,
-    dev_class=0xFF, dev_subclass=0xFF, dev_protocol=0xFF, ep0_max_packet=64,
+    device_class=0xFF, device_subclass=0xFF, device_protocol=0xFF, ep0_max_packet=64,
     manufacturer="Decky Controller", product="Controller", serial="DECK0001",
     extra_strings={4: SECURITY_STRING},
     config_body=CONFIG_BODY, num_interfaces=4, config_attributes=0xA0, max_power_ma=500,
@@ -125,35 +125,35 @@ class Xbox360Profile:
         if forward_qam:
             table.append((S.BTN_QAM, XB_GUIDE))
         for paddle, target in (paddles or {}).items():
-            t = str(target).upper()
-            if t == "NONE":
+            action = str(target).upper()
+            if action == "NONE":
                 continue
-            if t not in XB_BY_TARGET:
+            if action not in XB_BY_TARGET:
                 raise ValueError(f"unknown paddle target {target!r}")
-            table.append((PADDLE_BITS[paddle.upper()], XB_BY_TARGET[t]))
+            table.append((PADDLE_BITS[paddle.upper()], XB_BY_TARGET[action]))
         self._table = tuple(table)
         # Deck sticks report +Y = up, same as XInput — no inversion by default.
-        self._ysign = -1 if invert_y else 1
+        self._y_sign = -1 if invert_y else 1
         self._last_report = _REPORT.pack(0x00, REPORT_LEN, 0, 0, 0, 0, 0, 0, 0)
 
     # --- Profile protocol ----------------------------------------------------------
     def map_buttons(self, canonical: int) -> int:
-        xb = 0
-        for src, dst in self._table:
-            if canonical & src:
-                xb |= dst
-        return xb
+        xbox_buttons = 0
+        for canonical_bit, xbox_bit in self._table:
+            if canonical & canonical_bit:
+                xbox_buttons |= xbox_bit
+        return xbox_buttons
 
     def pack(self, state: ControllerState) -> bytes:
-        ys = self._ysign
-        rep = _REPORT.pack(
+        y_sign = self._y_sign
+        report = _REPORT.pack(
             0x00, REPORT_LEN, self.map_buttons(state.buttons),
             trigger_to_u8(state.lt), trigger_to_u8(state.rt),
-            S.clamp_s16(state.lx), S.clamp_s16(ys * state.ly),
-            S.clamp_s16(state.rx), S.clamp_s16(ys * state.ry),
+            S.clamp_s16(state.lx), S.clamp_s16(y_sign * state.ly),
+            S.clamp_s16(state.rx), S.clamp_s16(y_sign * state.ry),
         )
-        self._last_report = rep
-        return rep
+        self._last_report = report
+        return report
 
     def on_output(self, data: bytes) -> Optional[Feedback]:
         if len(data) < 2:

@@ -40,11 +40,11 @@ CABLE_KINDS = ("none", "pc", "charger", "host_device", "unknown")
 
 
 def _read_int(path: str) -> Optional[int]:
-    txt = read_text(path)
-    if txt is None:
+    text = read_text(path)
+    if text is None:
         return None
     try:
-        return int(txt)
+        return int(text)
     except ValueError:
         return None
 
@@ -83,15 +83,15 @@ def extcon_cables(sysfs: str = "/sys") -> Dict[str, int]:
         devices = sorted(os.listdir(base))
     except OSError:
         return result
-    for dev in devices:
-        state = read_text(os.path.join(base, dev, "state"))
+    for device_name in devices:
+        state = read_text(os.path.join(base, device_name, "state"))
         if not state:
             continue
         for line in state.splitlines():
             if "=" in line:
-                name, _, val = line.partition("=")
+                name, _, value = line.partition("=")
                 try:
-                    result[name.strip()] = int(val.strip())
+                    result[name.strip()] = int(value.strip())
                 except ValueError:
                     pass
         if result:
@@ -143,12 +143,13 @@ def _hwmon_channel(hwmon_dir: str, prefix: str, label: str, default_channel: int
         names = os.listdir(hwmon_dir)
     except OSError:
         return None
-    labels = sorted(n for n in names if n.startswith(prefix) and n.endswith("_label") and n[len(prefix):-6].isdigit())
+    labels = sorted(name for name in names
+                    if name.startswith(prefix) and name.endswith("_label") and name[len(prefix):-6].isdigit())
     if not labels:
         return _read_int(os.path.join(hwmon_dir, f"{prefix}{default_channel}_input"))
-    for fn in labels:
-        if read_text(os.path.join(hwmon_dir, fn)) == label:
-            return _read_int(os.path.join(hwmon_dir, fn[:-len("_label")] + "_input"))
+    for label_file in labels:
+        if read_text(os.path.join(hwmon_dir, label_file)) == label:
+            return _read_int(os.path.join(hwmon_dir, label_file[:-len("_label")] + "_input"))
     return None
 
 
@@ -161,7 +162,7 @@ def pd_contract(sysfs: str = "/sys") -> Tuple[Optional[int], Optional[int]]:
             _hwmon_channel(hwmon, "curr", PD_CURRENT_LABEL, 1))
 
 
-def classify_cable(extcon: Dict[str, int], power: Optional[bool], pd_mv: Optional[int]) -> str:
+def classify_cable(extcon: Dict[str, int], power: Optional[bool], pd_contract_mv: Optional[int]) -> str:
     """What is on the USB-C port, independent of whether a gadget is bound (one of ``CABLE_KINDS``).
 
     * ``host_device`` - extcon ``USB-HOST=1``: a dock/peripheral is attached, the port is a host;
@@ -174,18 +175,18 @@ def classify_cable(extcon: Dict[str, int], power: Optional[bool], pd_mv: Optiona
         return "host_device"
     if power is False:
         return "none"
-    if pd_mv is not None and pd_mv > 0:
-        return "pc" if pd_mv <= PC_PORT_MAX_MV else "charger"
+    if pd_contract_mv is not None and pd_contract_mv > 0:
+        return "pc" if pd_contract_mv <= PC_PORT_MAX_MV else "charger"
     return "unknown"
 
 
 def _modalias_resolves_to(modalias: str, module: str, timeout: float = 2.0) -> bool:
     """``modprobe -R <modalias>`` lists modules that would claim the device."""
     try:
-        out = subprocess.run(["modprobe", "-R", modalias], capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(["modprobe", "-R", modalias], capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return False
-    return module in out.stdout.replace("-", "_").split()
+    return module in result.stdout.replace("-", "_").split()
 
 
 def detect_drd(sysfs: str = "/sys", use_modprobe: bool = True) -> Dict[str, object]:
@@ -199,22 +200,22 @@ def detect_drd(sysfs: str = "/sys", use_modprobe: bool = True) -> Dict[str, obje
     except OSError:
         return {"enabled": False, "pci": None, "driver": None, "via": "none"}
     candidates = []
-    for dev in devices:
-        path = os.path.join(base, dev)
-        drv = None
+    for device_name in devices:
+        path = os.path.join(base, device_name)
+        driver = None
         try:
-            drv = os.path.basename(os.readlink(os.path.join(path, "driver")))
+            driver = os.path.basename(os.readlink(os.path.join(path, "driver")))
         except OSError:
             pass
-        if drv == DWC3_PCI_DRIVER:
-            return {"enabled": True, "pci": dev, "driver": drv, "via": "driver"}
-        cls = read_text(os.path.join(path, "class"), "") or ""
-        if cls.lower().startswith("0x0c03"):  # USB controllers only, keeps status fast
-            candidates.append((dev, drv, read_text(os.path.join(path, "modalias"), "") or ""))
+        if driver == DWC3_PCI_DRIVER:
+            return {"enabled": True, "pci": device_name, "driver": driver, "via": "driver"}
+        device_class = read_text(os.path.join(path, "class"), "") or ""
+        if device_class.lower().startswith("0x0c03"):  # USB controllers only, keeps status fast
+            candidates.append((device_name, driver, read_text(os.path.join(path, "modalias"), "") or ""))
     if use_modprobe:
-        for dev, drv, modalias in candidates:
+        for device_name, driver, modalias in candidates:
             if modalias and _modalias_resolves_to(modalias, DWC3_PCI_MODULE):
-                return {"enabled": True, "pci": dev, "driver": drv, "via": "modalias"}
+                return {"enabled": True, "pci": device_name, "driver": driver, "via": "modalias"}
     return {"enabled": False, "pci": None, "driver": None, "via": "none"}
 
 
@@ -267,7 +268,7 @@ def usb_role_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool =
     state = udc_state(udc, sysfs) if udc else None
     extcon = extcon_cables(sysfs)
     power = cable_power(sysfs)
-    pd_mv, pd_ma = pd_contract(sysfs)
+    pd_contract_mv, pd_contract_ma = pd_contract(sysfs)
     return UsbRoleStatus(
         drd_enabled=bool(drd["enabled"]), drd_pci=drd["pci"],  # type: ignore[arg-type]
         udc_name=udc, udc_state=state,
@@ -276,8 +277,8 @@ def usb_role_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool =
         extcon=extcon,
         host_connected=(state == UDC_STATE_CONFIGURED),
         raw_gadget=raw_gadget_available(dev, sysfs),
-        cable_power=power, pd_contract_mv=pd_mv, pd_contract_ma=pd_ma,
-        cable_kind=classify_cable(extcon, power, pd_mv),
+        cable_power=power, pd_contract_mv=pd_contract_mv, pd_contract_ma=pd_contract_ma,
+        cable_kind=classify_cable(extcon, power, pd_contract_mv),
     )
 
 

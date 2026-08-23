@@ -65,14 +65,14 @@ ABS_MT_TRACKING_ID = 0x39
 
 def default_state_file(run_dir: Optional[str] = None) -> str:
     """First writable state dir wins (``/run/deckgadget`` is created if possible)."""
-    dirs = (run_dir,) if run_dir else STATE_DIRS
-    for d in dirs:
-        if not d:
+    candidates = (run_dir,) if run_dir else STATE_DIRS
+    for directory in candidates:
+        if not directory:
             continue
         try:
-            os.makedirs(d, exist_ok=True)
-            if os.access(d, os.W_OK):
-                return os.path.join(d, STATE_FILE_NAME)
+            os.makedirs(directory, exist_ok=True)
+            if os.access(directory, os.W_OK):
+                return os.path.join(directory, STATE_FILE_NAME)
         except OSError:
             continue
     return os.path.join("/tmp", "deckgadget-" + STATE_FILE_NAME)
@@ -82,38 +82,38 @@ class Backlight:
     """Save / turn off / restore brightness for one backlight device."""
 
     def __init__(self, backlight_dir: str = BACKLIGHT_DIR, state_file: Optional[str] = None) -> None:
-        self.dir = backlight_dir
+        self.directory = backlight_dir
         self.state_file = state_file or default_state_file()
         self._saved: Optional[int] = None
 
     @property
     def available(self) -> bool:
-        return os.path.exists(os.path.join(self.dir, "brightness"))
+        return os.path.exists(os.path.join(self.directory, "brightness"))
 
     def brightness(self) -> Optional[int]:
-        v = read_text(os.path.join(self.dir, "brightness"))
+        text = read_text(os.path.join(self.directory, "brightness"))
         try:
-            return int(v) if v is not None else None
+            return int(text) if text is not None else None
         except ValueError:
             return None
 
     def max_brightness(self) -> int:
-        v = read_text(os.path.join(self.dir, "max_brightness"))
+        text = read_text(os.path.join(self.directory, "max_brightness"))
         try:
-            return max(1, int(v)) if v else 255
+            return max(1, int(text)) if text else 255
         except ValueError:
             return 255
 
     def set_brightness(self, value: int) -> None:
-        write_text(os.path.join(self.dir, "brightness"), str(int(value)))
+        write_text(os.path.join(self.directory, "brightness"), str(int(value)))
 
     def saved_value(self) -> Optional[int]:
         """Value remembered in memory or in the state file (``None`` when nothing saved)."""
         if self._saved is not None:
             return self._saved
-        v = read_text(self.state_file)
+        text = read_text(self.state_file)
         try:
-            return int(v) if v else None
+            return int(text) if text else None
         except ValueError:
             return None
 
@@ -130,12 +130,12 @@ class Backlight:
         no backlight device (the caller must not report the screen as off in that case).
         """
         if not self.available:
-            log.warning("backlight %s not available; screen off skipped", self.dir)
+            log.warning("backlight %s not available; screen off skipped", self.directory)
             return False
-        cur = self.brightness()
-        prev = self.saved_value()
+        current = self.brightness()
+        previously_saved = self.saved_value()
         # Keep an earlier saved value if the current one is 0 (e.g. we crashed mid-session).
-        value = cur if cur and cur > 0 else (prev if prev else self._safe_value(None))
+        value = current if current and current > 0 else (previously_saved if previously_saved else self._safe_value(None))
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
             write_text(self.state_file, str(value))
@@ -185,7 +185,7 @@ class CommandResult(NamedTuple):
         return self.returncode == 0
 
     def tail(self, limit: int = 200) -> str:
-        text = " ".join(s.strip() for s in (self.stdout, self.stderr, self.error or "") if s and s.strip())
+        text = " ".join(part.strip() for part in (self.stdout, self.stderr, self.error or "") if part and part.strip())
         text = " ".join(text.split())
         return text[:limit]
 
@@ -208,16 +208,16 @@ def run_command(argv: List[str], env: Dict[str, str], timeout: float = COMMAND_T
         # running as uid 1000 needs no setgroups/setgid/setuid (which would fail with EPERM).
         kwargs.update(user=int(user[0]), group=int(user[1]), extra_groups=[])
     try:
-        cp = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, timeout=timeout, text=True, errors="replace",
-                            **kwargs)  # type: ignore[arg-type]
-        return CommandResult(cp.returncode, cp.stdout or "", cp.stderr or "")
+        completed = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, timeout=timeout, text=True, errors="replace",
+                                   **kwargs)  # type: ignore[arg-type]
+        return CommandResult(completed.returncode, completed.stdout or "", completed.stderr or "")
     except subprocess.TimeoutExpired as exc:
-        def _s(b: object) -> str:
-            if isinstance(b, bytes):
-                return b.decode("utf-8", "replace")
-            return str(b) if b else ""
-        return CommandResult(None, _s(exc.stdout), _s(exc.stderr), f"timeout after {timeout:.1f}s")
+        def _as_text(output: object) -> str:
+            if isinstance(output, bytes):
+                return output.decode("utf-8", "replace")
+            return str(output) if output else ""
+        return CommandResult(None, _as_text(exc.stdout), _as_text(exc.stderr), f"timeout after {timeout:.1f}s")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         return CommandResult(None, "", "", f"{type(exc).__name__}: {exc}")
 
@@ -230,10 +230,10 @@ def _resolve_binary(name_or_path: str) -> Optional[str]:
     """
     if os.path.isabs(name_or_path):
         return name_or_path if os.path.isfile(name_or_path) else None
-    for d in ("/usr/bin", "/usr/local/bin", "/bin"):
-        p = os.path.join(d, name_or_path)
-        if os.path.isfile(p) and os.access(p, os.X_OK):
-            return p
+    for directory in ("/usr/bin", "/usr/local/bin", "/bin"):
+        candidate = os.path.join(directory, name_or_path)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     return shutil.which(name_or_path)
 
 
@@ -286,22 +286,22 @@ def find_gamescope_socket(run_user_base: str = RUN_USER_BASE, prefer_uid: int = 
             entries = os.listdir(run_user_base)
         except OSError:
             return None
-        entries = [e for e in entries if e.isdigit()]
-        entries.sort(key=lambda e: (0 if int(e) == prefer_uid else 1, int(e)))
-        dirs = [os.path.join(run_user_base, e) for e in entries]
-    for d in dirs:
+        uid_entries = [entry for entry in entries if entry.isdigit()]
+        uid_entries.sort(key=lambda entry: (0 if int(entry) == prefer_uid else 1, int(entry)))
+        dirs = [os.path.join(run_user_base, entry) for entry in uid_entries]
+    for directory in dirs:
         try:
-            names = [n for n in os.listdir(d) if n.startswith(GAMESCOPE_SOCKET_PREFIX)]
+            names = [name for name in os.listdir(directory) if name.startswith(GAMESCOPE_SOCKET_PREFIX)]
         except OSError:
             continue
 
-        def _key(n: str) -> Tuple[int, str]:
-            suffix = n[len(GAMESCOPE_SOCKET_PREFIX):]
-            return (int(suffix) if suffix.isdigit() else 1 << 30, n)
+        def _display_order(name: str) -> Tuple[int, str]:
+            suffix = name[len(GAMESCOPE_SOCKET_PREFIX):]
+            return (int(suffix) if suffix.isdigit() else 1 << 30, name)
 
-        for n in sorted(names, key=_key):
-            if _is_socket(os.path.join(d, n)):
-                return d, n
+        for name in sorted(names, key=_display_order):
+            if _is_socket(os.path.join(directory, name)):
+                return directory, name
     return None
 
 
@@ -340,8 +340,8 @@ class GamescopeSleep(ScreenMethod):
 
     @property
     def socket_path(self) -> Optional[str]:
-        rd, disp = self.runtime_dir, self.display
-        return os.path.join(rd, disp) if rd and disp else None
+        runtime_dir, display = self.runtime_dir, self.display
+        return os.path.join(runtime_dir, display) if runtime_dir and display else None
 
     def binary(self) -> Optional[str]:
         # An explicitly injected path is trusted (tests; unusual installs).
@@ -370,7 +370,7 @@ class GamescopeSleep(ScreenMethod):
                 log.warning("gamescope %s skipped: %s not found", what, GAMESCOPECTL)
                 return False
             argv = [binary, GAMESCOPE_SLEEP_CONVAR, "1" if asleep else "0"]
-            res = self.runner(argv, self.env(), self.timeout, None)
+            result = self.runner(argv, self.env(), self.timeout, None)
         except Exception as exc:  # noqa: BLE001 - never raise
             log.warning("gamescope %s failed: %s", what, exc)
             return False
@@ -378,12 +378,12 @@ class GamescopeSleep(ScreenMethod):
         # "Command not found." — verified with gamescope 3.16); only a connection failure
         # ("Failed to open GAMESCOPE_WAYLAND_DISPLAY.") gives rc=1.  Treat both as failure so
         # ``auto`` falls through instead of believing the panel is asleep.
-        output = res.tail()
-        if res.ok and "command not found" not in output.lower():
+        output = result.tail()
+        if result.ok and "command not found" not in output.lower():
             log.info("gamescope display %s (%s=%s via %s)", what, GAMESCOPE_SLEEP_CONVAR, "1" if asleep else "0",
                      self.socket_path)
             return True
-        log.warning("gamescope %s failed (rc=%s): %s", what, res.returncode, output or "no output")
+        log.warning("gamescope %s failed (rc=%s): %s", what, result.returncode, output or "no output")
         return False
 
     def sleep(self) -> bool:
@@ -442,14 +442,14 @@ class KscreenDpms(ScreenMethod):
                 log.warning("kscreen %s skipped: %s not found", what, KSCREEN_DOCTOR)
                 return False
             argv = [binary, "--dpms", "off" if asleep else "on"]
-            res = self.runner(argv, self.env(), self.timeout, (self.uid, self.gid))
+            result = self.runner(argv, self.env(), self.timeout, (self.uid, self.gid))
         except Exception as exc:  # noqa: BLE001
             log.warning("kscreen %s failed: %s", what, exc)
             return False
-        if res.ok:
+        if result.ok:
             log.info("kscreen dpms %s (%s)", "off" if asleep else "on", self.socket_path)
             return True
-        log.warning("kscreen %s failed (rc=%s): %s", what, res.returncode, res.tail() or "no output")
+        log.warning("kscreen %s failed (rc=%s): %s", what, result.returncode, result.tail() or "no output")
         return False
 
     def sleep(self) -> bool:
@@ -497,7 +497,7 @@ class BacklightDim(ScreenMethod):
         return True
 
     def info(self) -> Dict[str, object]:
-        return {"available": self.available(), "dir": self.backlight.dir}
+        return {"available": self.available(), "dir": self.backlight.directory}
 
 
 # --------------------------------------------------------------------------------------
@@ -509,7 +509,7 @@ def find_touchscreen(sysfs: str = "/sys", dev: str = "/dev",
     """``/dev/input/eventN`` of the device whose name contains ``name_substr``."""
     base = os.path.join(sysfs, "class", "input")
     try:
-        entries = sorted(os.listdir(base), key=lambda s: (len(s), s))
+        entries = sorted(os.listdir(base), key=lambda entry: (len(entry), entry))
     except OSError:
         entries = []
     for entry in entries:
@@ -529,24 +529,24 @@ def find_touchscreen(sysfs: str = "/sys", dev: str = "/dev",
             continue
         for line in block.splitlines():
             if line.startswith("H:"):
-                for tok in line.split():
-                    if tok.startswith("event"):
-                        return os.path.join(dev, "input", tok)
+                for token in line.split():
+                    if token.startswith("event"):
+                        return os.path.join(dev, "input", token)
     return None
 
 
-def parse_input_events(buf: bytes):
+def parse_input_events(data: bytes):
     """Yield ``(type, code, value)`` tuples from a raw evdev read."""
-    n = len(buf) // INPUT_EVENT.size
-    for i in range(n):
-        _sec, _usec, typ, code, value = INPUT_EVENT.unpack_from(buf, i * INPUT_EVENT.size)
-        yield typ, code, value
+    count = len(data) // INPUT_EVENT.size
+    for i in range(count):
+        _sec, _usec, event_type, code, value = INPUT_EVENT.unpack_from(data, i * INPUT_EVENT.size)
+        yield event_type, code, value
 
 
-def is_touch_event(typ: int, code: int, value: int) -> bool:
-    if typ == EV_KEY and code == BTN_TOUCH and value:
+def is_touch_event(event_type: int, code: int, value: int) -> bool:
+    if event_type == EV_KEY and code == BTN_TOUCH and value:
         return True
-    if typ == EV_ABS and code == ABS_MT_TRACKING_ID and value >= 0:
+    if event_type == EV_ABS and code == ABS_MT_TRACKING_ID and value >= 0:
         return True
     return False
 
@@ -555,7 +555,7 @@ class TouchWatcher:
     """Background reader of an evdev node; calls ``on_touch()`` (debounced) on finger down."""
 
     def __init__(self, event_path: str, on_touch: Callable[[], None], debounce_s: float = 0.2) -> None:
-        self.path = event_path
+        self.event_path = event_path
         self.on_touch = on_touch
         self.debounce_s = debounce_s
         self._stop = threading.Event()
@@ -564,16 +564,16 @@ class TouchWatcher:
         self.last_touch = 0.0
 
     def start(self) -> None:
-        self._fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        self._fd = os.open(self.event_path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="touch-watch", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
-        t = self._thread
-        if t is not None and t is not threading.current_thread():
-            t.join(timeout=1.0)
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
         self._thread = None
         if self._fd >= 0:
             try:
@@ -586,23 +586,23 @@ class TouchWatcher:
         fd = self._fd
         while not self._stop.is_set():
             try:
-                r, _, _ = select.select([fd], [], [], 0.25)
+                readable, _, _ = select.select([fd], [], [], 0.25)
             except (OSError, ValueError):
                 break
-            if not r:
+            if not readable:
                 continue
             try:
-                buf = os.read(fd, INPUT_EVENT.size * 64)
+                data = os.read(fd, INPUT_EVENT.size * 64)
             except BlockingIOError:
                 continue
             except OSError as exc:
                 log.warning("touchscreen read failed: %s", exc)
                 break
-            if not buf:
+            if not data:
                 break
             now = time.monotonic()
-            for typ, code, value in parse_input_events(buf):
-                if is_touch_event(typ, code, value) and now - self.last_touch >= self.debounce_s:
+            for event_type, code, value in parse_input_events(data):
+                if is_touch_event(event_type, code, value) and now - self.last_touch >= self.debounce_s:
                     self.last_touch = now
                     try:
                         self.on_touch()
@@ -677,17 +677,17 @@ class ScreenController:
                     log.warning("screen on_change callback failed: %s", exc)
 
     def _choose_and_sleep(self) -> Optional[ScreenMethod]:
-        for m in self.candidates():
+        for method in self.candidates():
             try:
-                if not m.available():
-                    log.info("screen method %s not available", m.name)
+                if not method.available():
+                    log.info("screen method %s not available", method.name)
                     continue
-                if m.sleep():
-                    log.info("screen off via %s", m.name)
-                    return m
-                log.warning("screen method %s could not turn the screen off", m.name)
+                if method.sleep():
+                    log.info("screen off via %s", method.name)
+                    return method
+                log.warning("screen method %s could not turn the screen off", method.name)
             except Exception as exc:  # noqa: BLE001 - cosmetic feature, never fatal
-                log.warning("screen method %s failed: %s", m.name, exc)
+                log.warning("screen method %s failed: %s", method.name, exc)
         log.warning("screen stays on: no working screen-off method (requested %s)", self.requested_method)
         return None
 

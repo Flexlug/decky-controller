@@ -26,7 +26,7 @@ DEFAULT_KILL_COMBO = "L4+R4"
 DEFAULT_KILL_HOLD_MS = 1500
 DEFAULT_TOUCH_WAKE_SECONDS = 5
 DEFAULT_SCREEN_METHOD = "auto"
-DEFAULT_PADDLES: Dict[str, str] = {p: "none" for p in PADDLE_NAMES}
+DEFAULT_PADDLES: Dict[str, str] = {name: "none" for name in PADDLE_NAMES}
 
 
 class ConfigError(ValueError):
@@ -49,11 +49,11 @@ def resolve_transport(profile: str, transport: str) -> str:
 
 def parse_kill_combo(text: str) -> int:
     """``"L4+R4"`` -> canonical button mask. Only the combos listed in docs/ARCHITECTURE.md are allowed."""
-    norm = "+".join(p.strip().upper() for p in text.split("+") if p.strip())
-    if norm not in KILL_COMBOS:
+    normalized = "+".join(part.strip().upper() for part in text.split("+") if part.strip())
+    if normalized not in KILL_COMBOS:
         raise ConfigError(f"unsupported kill combo {text!r} (expected one of {KILL_COMBOS})")
     mask = 0
-    for part in norm.split("+"):
+    for part in normalized.split("+"):
         mask |= S.button_from_name(part)
     return mask
 
@@ -69,7 +69,7 @@ def parse_paddles(text: Optional[str]) -> Dict[str, str]:
             continue
         if "=" not in item:
             raise ConfigError(f"bad paddle mapping {item!r} (expected NAME=TARGET)")
-        name, target = (x.strip() for x in item.split("=", 1))
+        name, target = (piece.strip() for piece in item.split("=", 1))
         name = name.upper()
         if name not in PADDLE_NAMES:
             raise ConfigError(f"unknown paddle {name!r} (expected one of {PADDLE_NAMES})")
@@ -83,13 +83,13 @@ def parse_paddles(text: Optional[str]) -> Dict[str, str]:
 def validate_paddles(paddles: Dict[str, str]) -> Dict[str, str]:
     out = dict(DEFAULT_PADDLES)
     for name, target in (paddles or {}).items():
-        n = str(name).upper()
-        if n not in PADDLE_NAMES:
+        paddle = str(name).upper()
+        if paddle not in PADDLE_NAMES:
             raise ConfigError(f"unknown paddle {name!r}")
-        t = "none" if str(target).lower() == "none" else str(target).upper()
-        if t not in PADDLE_TARGETS:
+        action = "none" if str(target).lower() == "none" else str(target).upper()
+        if action not in PADDLE_TARGETS:
             raise ConfigError(f"unknown paddle target {target!r}")
-        out[n] = t
+        out[paddle] = action
     return out
 
 

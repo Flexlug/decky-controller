@@ -81,12 +81,12 @@ class ScreenLike:
 
 
 class Session:
-    def __init__(self, cfg: RunConfig, source: InputSource, profile: Profile, transport: Transport,
+    def __init__(self, config: RunConfig, source: InputSource, profile: Profile, transport: Transport,
                  screen: Optional[ScreenLike] = None, udc_state: Optional[Callable[[], Optional[str]]] = None,
                  events: Optional[JsonEventSink] = None, clock: Callable[[], float] = time.monotonic,
                  read_timeout: float = 0.05, unplug_grace_s: float = 1.0, metrics_interval: float = 2.0,
                  udc_poll_interval: float = 0.1, forward_rumble: bool = False) -> None:
-        self.cfg = cfg
+        self.config = config
         self.source = source
         self.profile = profile
         self.transport = transport
@@ -105,7 +105,7 @@ class Session:
         self.reports = 0
         self.reports_sent = 0
         self._stop = threading.Event()
-        self._combo = HoldDetector(cfg.kill_mask, cfg.kill_hold_s)
+        self._combo = HoldDetector(config.kill_mask, config.kill_hold_s)
         self._source_open = False
         self._transport_started = False
         self._lock = threading.Lock()
@@ -125,7 +125,7 @@ class Session:
 
     def run(self) -> int:
         """Run to completion; returns the process exit code (0 = clean, 1 = error)."""
-        rc = 0
+        exit_code = 0
         try:
             self._set_state(CAPTURING, f"source={self.source.name}")
             if self.screen is not None:
@@ -151,10 +151,10 @@ class Session:
                     self.kill_reason = KILL_ERROR
             log.exception("session failed: %s", exc)
             self.events.error(f"{type(exc).__name__}: {exc}")
-            rc = 1
+            exit_code = 1
         finally:
             self._teardown()
-        return rc
+        return exit_code
 
     # --- internals -------------------------------------------------------------------
     def _set_state(self, state: str, detail: str = "") -> None:
@@ -168,26 +168,26 @@ class Session:
                 self.kill_reason = reason
         self._stop.set()
 
-    def _on_feedback(self, fb: Feedback) -> None:
-        self.last_feedback = fb
-        if fb.kind == "rumble":
-            log.info("host rumble left=%d right=%d", fb.left, fb.right)
+    def _on_feedback(self, feedback: Feedback) -> None:
+        self.last_feedback = feedback
+        if feedback.kind == "rumble":
+            log.info("host rumble left=%d right=%d", feedback.left, feedback.right)
             if self.forward_rumble:
                 try:
-                    self.source.rumble(fb.left, fb.right)
+                    self.source.rumble(feedback.left, feedback.right)
                 except Exception as exc:  # noqa: BLE001
                     log.debug("rumble forward failed: %s", exc)
-        elif fb.kind == "led":
-            log.info("host LED pattern 0x%02x", fb.value)
+        elif feedback.kind == "led":
+            log.info("host LED pattern 0x%02x", feedback.value)
         else:
-            log.info("host output report: %s", fb.raw.hex())
+            log.info("host output report: %s", feedback.raw.hex())
 
     def _host_connected(self) -> bool:
         if self.udc_state is not None:
-            st = self.udc_state()
-            if st is not None:
+            udc_state = self.udc_state()
+            if udc_state is not None:
                 # sysfs is the authority (raw-gadget may lag on DISCONNECT); transport must agree
-                return st == "configured" and self.transport.connected()
+                return udc_state == "configured" and self.transport.connected()
         return self.transport.connected()
 
     def _loop(self) -> None:
@@ -201,22 +201,22 @@ class Session:
         combo = self._combo
         mask = combo.mask
         while not self._stop.is_set():
-            st = self.source.read(self.read_timeout)
+            controller_state = self.source.read(self.read_timeout)
             now = clock()
-            if st is not None:
+            if controller_state is not None:
                 self.reports += 1
                 window_reports += 1
-                if combo.feed(st.buttons, now):
+                if combo.feed(controller_state.buttons, now):
                     log.info("kill combo held for %.1fs", combo.hold_s)
                     self._kill(KILL_COMBO)
                     break
                 if combo.engaged:
-                    st.buttons &= ~mask   # the kill combo is never forwarded to the host
+                    controller_state.buttons &= ~mask   # the kill combo is never forwarded to the host
             if now >= next_udc:
                 next_udc = now + self.udc_poll_interval
-                terr = self.transport.error
-                if terr is not None:
-                    raise RuntimeError(f"transport failed: {terr}")
+                transport_error = self.transport.error
+                if transport_error is not None:
+                    raise RuntimeError(f"transport failed: {transport_error}")
                 connected = self._host_connected()
                 if self.state == WAITING_HOST:
                     if connected:
@@ -231,14 +231,15 @@ class Session:
                         log.info("host gone for %.1fs -> unplug", now - disconnected_since)
                         self._kill(KILL_UNPLUG)
                         break
-            if st is not None and self.state == ACTIVE:
-                self.transport.send(self.profile.pack(st))
+            if controller_state is not None and self.state == ACTIVE:
+                self.transport.send(self.profile.pack(controller_state))
                 self.reports_sent += 1
             if now >= next_metrics:
                 elapsed = max(1e-6, now - window_start)
-                tm = self.transport.metrics()
-                self.events.metrics(hz=window_reports / elapsed, reports=self.reports, dropped=tm.dropped,
-                                    sent=tm.sent, errors=tm.errors, state=self.state)
+                transport_metrics = self.transport.metrics()
+                self.events.metrics(hz=window_reports / elapsed, reports=self.reports,
+                                    dropped=transport_metrics.dropped, sent=transport_metrics.sent,
+                                    errors=transport_metrics.errors, state=self.state)
                 window_start, window_reports = now, 0
                 next_metrics = now + self.metrics_interval
 
@@ -268,28 +269,28 @@ class Session:
         self._set_state(STOPPED, f"reason={reason}")
 
 
-def build_session(cfg: RunConfig, events: Optional[JsonEventSink] = None, sysfs: str = "/sys",
+def build_session(config: RunConfig, events: Optional[JsonEventSink] = None, sysfs: str = "/sys",
                   dev: str = "/dev") -> Session:
-    """Wire real components according to ``cfg`` (``cfg.demo`` selects the demo source)."""
+    """Wire real components according to ``config`` (``config.demo`` selects the demo source)."""
     from .platform.screen import ScreenController
     from .platform.usb_role import UdcWatcher
     from .profiles import make_profile
     from .transports import make_transport
 
     events = events or JsonEventSink()
-    profile = make_profile(cfg.profile, paddles=cfg.paddles, forward_steam=cfg.forward_steam,
-                           forward_qam=cfg.forward_qam)
-    transport = make_transport(cfg.resolved_transport, udc=cfg.udc)
-    if cfg.demo:
+    profile = make_profile(config.profile, paddles=config.paddles, forward_steam=config.forward_steam,
+                           forward_qam=config.forward_qam)
+    transport = make_transport(config.resolved_transport, udc=config.udc)
+    if config.demo:
         from .sources.demo import DemoSource
         source: InputSource = DemoSource()
     else:
         from .sources.neptune_usb import NeptuneUsbSource
         source = NeptuneUsbSource(sysfs=sysfs, dev=dev)
     screen = None
-    if cfg.screen_off:
-        screen = ScreenController(wake_seconds=cfg.touch_wake_seconds, sysfs=sysfs, dev=dev,
-                                  method=cfg.screen_method,
+    if config.screen_off:
+        screen = ScreenController(wake_seconds=config.touch_wake_seconds, sysfs=sysfs, dev=dev,
+                                  method=config.screen_method,
                                   on_change=lambda off, method: events.screen(off, method))
-    watcher = UdcWatcher(cfg.udc, sysfs)
-    return Session(cfg, source, profile, transport, screen=screen, udc_state=watcher.state, events=events)
+    watcher = UdcWatcher(config.udc, sysfs)
+    return Session(config, source, profile, transport, screen=screen, udc_state=watcher.state, events=events)

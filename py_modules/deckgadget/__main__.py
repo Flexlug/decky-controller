@@ -26,41 +26,41 @@ from .util.fs import read_text
 log = get_logger("cli")
 
 
-def _add_run_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--profile", choices=C.PROFILES, default=C.DEFAULT_PROFILE)
-    p.add_argument("--transport", choices=C.TRANSPORTS, default=C.DEFAULT_TRANSPORT)
-    p.add_argument("--kill-combo", default=C.DEFAULT_KILL_COMBO, help="one of %s" % ", ".join(C.KILL_COMBOS))
-    p.add_argument("--kill-hold-ms", type=int, default=C.DEFAULT_KILL_HOLD_MS)
-    p.add_argument("--screen-off", action="store_true", default=False)
-    p.add_argument("--touch-wake-seconds", type=float, default=C.DEFAULT_TOUCH_WAKE_SECONDS)
-    p.add_argument("--screen-method", choices=C.SCREEN_METHODS, default=C.DEFAULT_SCREEN_METHOD,
+def _add_run_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--profile", choices=C.PROFILES, default=C.DEFAULT_PROFILE)
+    parser.add_argument("--transport", choices=C.TRANSPORTS, default=C.DEFAULT_TRANSPORT)
+    parser.add_argument("--kill-combo", default=C.DEFAULT_KILL_COMBO, help="one of %s" % ", ".join(C.KILL_COMBOS))
+    parser.add_argument("--kill-hold-ms", type=int, default=C.DEFAULT_KILL_HOLD_MS)
+    parser.add_argument("--screen-off", action="store_true", default=False)
+    parser.add_argument("--touch-wake-seconds", type=float, default=C.DEFAULT_TOUCH_WAKE_SECONDS)
+    parser.add_argument("--screen-method", choices=C.SCREEN_METHODS, default=C.DEFAULT_SCREEN_METHOD,
                    help="how to turn the screen off: auto = gamescope display sleep (Gaming Mode) -> "
                         "kscreen-doctor DPMS (Desktop Mode) -> backlight 0 (dims only)")
-    p.add_argument("--paddles", default=None, help="L4=none,L5=none,R4=none,R5=none")
-    p.add_argument("--forward-steam", action="store_true", default=False, help="map Steam -> Guide")
-    p.add_argument("--forward-qam", action="store_true", default=False, help="map QAM -> Guide")
-    p.add_argument("--udc", default=None, help="UDC name (default: first in /sys/class/udc)")
-    p.add_argument("--log-file", default=None)
-    p.add_argument("-v", "--verbose", action="store_true", default=False)
+    parser.add_argument("--paddles", default=None, help="L4=none,L5=none,R4=none,R5=none")
+    parser.add_argument("--forward-steam", action="store_true", default=False, help="map Steam -> Guide")
+    parser.add_argument("--forward-qam", action="store_true", default=False, help="map QAM -> Guide")
+    parser.add_argument("--udc", default=None, help="UDC name (default: first in /sys/class/udc)")
+    parser.add_argument("--log-file", default=None)
+    parser.add_argument("-v", "--verbose", action="store_true", default=False)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="deckgadget", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--version", action="version", version=f"deckgadget {__version__}")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    _add_run_args(sub.add_parser("run", help="run the controller session"))
-    _add_run_args(sub.add_parser("demo", help="run with a synthetic input source"))
-    st = sub.add_parser("status", help="print a JSON status snapshot")
-    st.add_argument("--no-modprobe", action="store_true", help="skip modprobe -R based DRD detection")
-    rc = sub.add_parser("recover", help="idempotent full rollback (exit 0)")
-    rc.add_argument("--log-file", default=None)
-    pr = sub.add_parser("probe", help="capture the controller and print decoded reports")
-    pr.add_argument("--seconds", type=float, default=10.0)
-    pr.add_argument("--all", action="store_true", help="print every report, not only on change")
-    pr.add_argument("--json", action="store_true", help="machine-readable output")
-    pr.add_argument("--sensors", action="store_true", help="include gyro/accel/pads")
-    pr.add_argument("-v", "--verbose", action="store_true", default=False)
-    return ap
+    parser = argparse.ArgumentParser(prog="deckgadget", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", action="version", version=f"deckgadget {__version__}")
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+    _add_run_args(subparsers.add_parser("run", help="run the controller session"))
+    _add_run_args(subparsers.add_parser("demo", help="run with a synthetic input source"))
+    status_parser = subparsers.add_parser("status", help="print a JSON status snapshot")
+    status_parser.add_argument("--no-modprobe", action="store_true", help="skip modprobe -R based DRD detection")
+    recover_parser = subparsers.add_parser("recover", help="idempotent full rollback (exit 0)")
+    recover_parser.add_argument("--log-file", default=None)
+    probe_parser = subparsers.add_parser("probe", help="capture the controller and print decoded reports")
+    probe_parser.add_argument("--seconds", type=float, default=10.0)
+    probe_parser.add_argument("--all", action="store_true", help="print every report, not only on change")
+    probe_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    probe_parser.add_argument("--sensors", action="store_true", help="include gyro/accel/pads")
+    probe_parser.add_argument("-v", "--verbose", action="store_true", default=False)
+    return parser
 
 
 def config_from_args(args: argparse.Namespace, demo: bool = False) -> C.RunConfig:
@@ -92,10 +92,10 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"usb_role: {exc}")
     try:
-        n = neptune.find_neptune(sysfs, dev)
-        out["neptune_present"] = n is not None
-        out["neptune_captured"] = bool(n and n.captured)
-        out["neptune"] = n.as_dict() if n else None
+        device = neptune.find_neptune(sysfs, dev)
+        out["neptune_present"] = device is not None
+        out["neptune_captured"] = bool(device and device.captured)
+        out["neptune"] = device.as_dict() if device else None
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"neptune: {exc}")
         out["neptune_present"] = False
@@ -105,21 +105,24 @@ def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = 
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"gadgets: {exc}")
     try:
-        bl = screen.Backlight()
-        out["backlight"] = {"available": bl.available, "brightness": bl.brightness() if bl.available else None,
-                            "max": bl.max_brightness() if bl.available else None, "saved": bl.saved_value(),
-                            "state_file": bl.state_file}
-        out["screen_off"] = bool(bl.available and bl.brightness() == 0 and bl.saved_value() is not None)
+        backlight = screen.Backlight()
+        out["backlight"] = {"available": backlight.available,
+                            "brightness": backlight.brightness() if backlight.available else None,
+                            "max": backlight.max_brightness() if backlight.available else None,
+                            "saved": backlight.saved_value(), "state_file": backlight.state_file}
+        out["screen_off"] = bool(backlight.available and backlight.brightness() == 0
+                                 and backlight.saved_value() is not None)
         out["touchscreen"] = screen.find_touchscreen(sysfs, dev)
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"screen: {exc}")
     try:
-        gs = screen.GamescopeSleep()
-        ks = screen.KscreenDpms()
-        bl_avail = bool(out.get("backlight", {}).get("available")) if isinstance(out.get("backlight"), dict) else False
+        gamescope = screen.GamescopeSleep()
+        kscreen = screen.KscreenDpms()
+        backlight_available = bool(out.get("backlight", {}).get("available")) if isinstance(out.get("backlight"), dict) else False
         # Which screen-off strategies would work right now (auto order: gamescope -> kscreen -> backlight).
-        out["screen_methods"] = {"gamescope": gs.available(), "kscreen": ks.available(), "backlight": bl_avail}
-        out["gamescope_socket"] = gs.socket_path
+        out["screen_methods"] = {"gamescope": gamescope.available(), "kscreen": kscreen.available(),
+                                 "backlight": backlight_available}
+        out["gamescope_socket"] = gamescope.socket_path
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"screen_methods: {exc}")
     out["ok"] = not out["errors"]
@@ -157,15 +160,15 @@ def cmd_run(args: argparse.Namespace, demo: bool = False) -> int:
     setup_logging(logging.DEBUG if args.verbose else logging.INFO, args.log_file)
     events = JsonEventSink(sys.stdout)
     try:
-        cfg = config_from_args(args, demo=demo)
+        config = config_from_args(args, demo=demo)
     except C.ConfigError as exc:
         events.error(f"config: {exc}")
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    log.info("deckgadget %s %s: %s", __version__, "demo" if demo else "run", json.dumps(cfg.as_dict()))
+    log.info("deckgadget %s %s: %s", __version__, "demo" if demo else "run", json.dumps(config.as_dict()))
     if os.geteuid() != 0:
         log.warning("not running as root; capture/gadget operations will fail")
-    session = build_session(cfg, events)
+    session = build_session(config, events)
 
     def on_signal(signum, _frame) -> None:
         log.info("signal %s -> stopping", signal.Signals(signum).name)
@@ -188,7 +191,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
     if os.geteuid() != 0:
         print("probe needs root (usbfs + sysfs unbind)", file=sys.stderr)
-    src = NeptuneUsbSource(with_sensors=args.sensors)
+    source = NeptuneUsbSource(with_sensors=args.sensors)
     stop = {"flag": False}
 
     def on_signal(signum, _frame) -> None:
@@ -196,10 +199,10 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
-    emit = (lambda obj: print(json.dumps(obj, ensure_ascii=False, default=str), flush=True)) if args.json else None
+    emit = (lambda payload: print(json.dumps(payload, ensure_ascii=False, default=str), flush=True)) if args.json else None
     try:
-        src.open()
-        print(f"probe: device {src.device.name if src.device else '?'} ep 0x{src.ep_in:02x}; "
+        source.open()
+        print(f"probe: device {source.device.name if source.device else '?'} ep 0x{source.ep_in:02x}; "
               f"press buttons — {args.seconds:.0f}s (Ctrl+C to stop). Kill combo is NOT active here.",
               file=sys.stderr, flush=True)
         deadline = time.monotonic() + args.seconds
@@ -208,42 +211,42 @@ def cmd_probe(args: argparse.Namespace) -> int:
         count = 0
         other = 0
         while not stop["flag"] and time.monotonic() < deadline:
-            raw = src.read_raw(0.1)
+            raw = source.read_raw(0.1)
             if raw is None:
                 continue
-            dec = decode_report(raw)
-            if not dec.get("deck_state"):
+            decoded = decode_report(raw)
+            if not decoded.get("deck_state"):
                 other += 1
                 if args.all:
-                    print(f"[other type={dec.get('type')}] {raw.hex()}", flush=True)
+                    print(f"[other type={decoded.get('type')}] {raw.hex()}", flush=True)
                 continue
             count += 1
-            st = parse_report(raw, time.monotonic(), with_sensors=args.sensors)
-            buttons = st.buttons if st else 0
+            state = parse_report(raw, time.monotonic(), with_sensors=args.sensors)
+            buttons = state.buttons if state else 0
             changed = buttons != last_buttons
             now = time.monotonic()
             if args.all or changed or now - last_summary >= 0.5:
                 if emit:
-                    emit({"raw": raw.hex(), "decoded": dec, "canonical": st.as_dict() if st else None})
+                    emit({"raw": raw.hex(), "decoded": decoded, "canonical": state.as_dict() if state else None})
                 else:
                     if changed or args.all:
                         print(f"raw: {raw.hex()}")
-                        print(f"  packet={dec['packet']} L={dec['buttons_l']} H={dec['buttons_h']} "
-                              f"bits={dec['buttons']} unknown={dec['unknown_bits']}")
+                        print(f"  packet={decoded['packet']} L={decoded['buttons_l']} H={decoded['buttons_h']} "
+                              f"bits={decoded['buttons']} unknown={decoded['unknown_bits']}")
                         print(f"  canonical={button_names(buttons)}")
-                    print(f"  sticks L={dec['lstick']} R={dec['rstick']} trig L={dec['trigger_l']} R={dec['trigger_r']}"
-                          + (f" lpad={dec['lpad']} rpad={dec['rpad']} gyro={dec['gyro']} accel={dec['accel']}"
+                    print(f"  sticks L={decoded['lstick']} R={decoded['rstick']} trig L={decoded['trigger_l']} R={decoded['trigger_r']}"
+                          + (f" lpad={decoded['lpad']} rpad={decoded['rpad']} gyro={decoded['gyro']} accel={decoded['accel']}"
                              if args.sensors else ""), flush=True)
                 last_summary = now
                 last_buttons = buttons
-        print(f"probe done: {count} state reports, {other} other packets, heartbeats={src.heartbeats}",
+        print(f"probe done: {count} state reports, {other} other packets, heartbeats={source.heartbeats}",
               file=sys.stderr, flush=True)
         return 0
     except Exception as exc:  # noqa: BLE001
         print(f"probe failed: {exc}", file=sys.stderr)
         return 1
     finally:
-        src.close()
+        source.close()
 
 
 def main(argv: Optional[List[str]] = None) -> int:

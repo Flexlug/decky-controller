@@ -63,7 +63,7 @@ BUTTON_BY_NAME.update({"LB": BTN_L1, "RB": BTN_R1, "BACK": BTN_VIEW, "START": BT
 
 def button_names(mask: int) -> list:
     """Names of all canonical bits set in ``mask`` (bit order)."""
-    return [BUTTON_NAMES[b] for b in sorted(BUTTON_NAMES) if mask & b]
+    return [BUTTON_NAMES[bit] for bit in sorted(BUTTON_NAMES) if mask & bit]
 
 
 def button_from_name(name: str) -> int:
@@ -81,12 +81,12 @@ STICK_MAX = 32767
 TRIGGER_MAX = 32767
 
 
-def clamp_s16(v: int) -> int:
-    return STICK_MIN if v < STICK_MIN else STICK_MAX if v > STICK_MAX else int(v)
+def clamp_s16(value: int) -> int:
+    return STICK_MIN if value < STICK_MIN else STICK_MAX if value > STICK_MAX else int(value)
 
 
-def clamp_trigger(v: int) -> int:
-    return 0 if v < 0 else TRIGGER_MAX if v > TRIGGER_MAX else int(v)
+def clamp_trigger(value: int) -> int:
+    return 0 if value < 0 else TRIGGER_MAX if value > TRIGGER_MAX else int(value)
 
 
 @dataclass(slots=True)

@@ -26,14 +26,14 @@ class DemoSource:
         self.amplitude = amplitude
         self._clock = clock
         self._sleep = sleep
-        self._t0 = 0.0
+        self._started_at = 0.0
         self._next = 0.0
         self._packet = 0
         self.opened = False
 
     def open(self) -> None:
-        self._t0 = self._clock()
-        self._next = self._t0
+        self._started_at = self._clock()
+        self._next = self._started_at
         self.opened = True
         log.info("demo source: %.0f Hz, sticks circling, A blinking", 1.0 / self.period)
 
@@ -49,17 +49,17 @@ class DemoSource:
         self._next += self.period
         if self._next < now - 1.0:  # we fell far behind: resync instead of bursting
             self._next = now + self.period
-        t = now - self._t0
+        elapsed = now - self._started_at
         self._packet += 1
-        buttons = S.BTN_A if int(t * 2) % 2 == 0 else 0
-        buttons |= _DPAD_SEQ[int(t) % 4] if int(t / 4) % 2 else 0
-        tri = t % 2.0
-        trig = int((tri if tri < 1.0 else 2.0 - tri) * S.TRIGGER_MAX)
+        buttons = S.BTN_A if int(elapsed * 2) % 2 == 0 else 0
+        buttons |= _DPAD_SEQ[int(elapsed) % 4] if int(elapsed / 4) % 2 else 0
+        phase = elapsed % 2.0
+        trigger = int((phase if phase < 1.0 else 2.0 - phase) * S.TRIGGER_MAX)
         return ControllerState(
             buttons=buttons,
-            lx=int(self.amplitude * math.sin(t)), ly=int(self.amplitude * math.cos(t)),
-            rx=int(self.amplitude * math.sin(t * 0.5)), ry=int(self.amplitude * math.cos(t * 0.5)),
-            lt=trig, rt=S.TRIGGER_MAX - trig,
+            lx=int(self.amplitude * math.sin(elapsed)), ly=int(self.amplitude * math.cos(elapsed)),
+            rx=int(self.amplitude * math.sin(elapsed * 0.5)), ry=int(self.amplitude * math.cos(elapsed * 0.5)),
+            lt=trigger, rt=S.TRIGGER_MAX - trigger,
             packet=self._packet, ts=now,
         )
 

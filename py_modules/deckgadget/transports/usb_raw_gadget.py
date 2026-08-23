@@ -39,7 +39,7 @@ import struct
 import subprocess
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from ..platform import usb_role
 from ..profiles.base import (
@@ -126,31 +126,33 @@ class RawGadgetDevice:
     def run(self) -> None:
         ioctl(self.fd, USB_RAW_IOCTL_RUN)
 
-    def event_fetch(self, maxlen: int = 256) -> Tuple[int, bytes]:
-        buf = ctypes.create_string_buffer(struct.pack("<II", 0, maxlen) + b"\0" * maxlen, SZ_EVENT + maxlen)
-        ioctl(self.fd, USB_RAW_IOCTL_EVENT_FETCH, buf)
-        typ, length = struct.unpack_from("<II", buf.raw, 0)
-        return typ, buf.raw[SZ_EVENT:SZ_EVENT + length]
+    def event_fetch(self, max_length: int = 256) -> Tuple[int, bytes]:
+        buffer = ctypes.create_string_buffer(struct.pack("<II", 0, max_length) + b"\0" * max_length,
+                                             SZ_EVENT + max_length)
+        ioctl(self.fd, USB_RAW_IOCTL_EVENT_FETCH, buffer)
+        event_type, length = struct.unpack_from("<II", buffer.raw, 0)
+        return event_type, buffer.raw[SZ_EVENT:SZ_EVENT + length]
 
-    def _ep_io(self, req: int, ep: int, data: bytes, read_len: Optional[int] = None) -> Tuple[int, bytes]:
-        payload = data if read_len is None else b"\0" * read_len
-        length = len(data) if read_len is None else read_len
-        buf = ctypes.create_string_buffer(struct.pack("<HHI", ep, 0, length) + payload, SZ_EP_IO + len(payload))
-        n = ioctl(self.fd, req, buf)
-        return n, buf.raw[SZ_EP_IO:SZ_EP_IO + max(n, 0)]
+    def _ep_io(self, request: int, endpoint: int, data: bytes, read_length: Optional[int] = None) -> Tuple[int, bytes]:
+        payload = data if read_length is None else b"\0" * read_length
+        length = len(data) if read_length is None else read_length
+        buffer = ctypes.create_string_buffer(struct.pack("<HHI", endpoint, 0, length) + payload,
+                                             SZ_EP_IO + len(payload))
+        transferred = ioctl(self.fd, request, buffer)
+        return transferred, buffer.raw[SZ_EP_IO:SZ_EP_IO + max(transferred, 0)]
 
     def ep0_write(self, data: bytes) -> int:
         return self._ep_io(USB_RAW_IOCTL_EP0_WRITE, 0, data)[0]
 
-    def ep0_read(self, n: int) -> bytes:
-        return self._ep_io(USB_RAW_IOCTL_EP0_READ, 0, b"", n)[1]
+    def ep0_read(self, length: int) -> bytes:
+        return self._ep_io(USB_RAW_IOCTL_EP0_READ, 0, b"", length)[1]
 
     def ep0_stall(self) -> None:
         ioctl(self.fd, USB_RAW_IOCTL_EP0_STALL)
 
-    def ep_enable(self, desc7: bytes) -> int:
-        buf = ctypes.create_string_buffer(bytes(desc7) + b"\0\0", SZ_EP_DESC)
-        return ioctl(self.fd, USB_RAW_IOCTL_EP_ENABLE, buf)
+    def ep_enable(self, endpoint_descriptor: bytes) -> int:
+        buffer = ctypes.create_string_buffer(bytes(endpoint_descriptor) + b"\0\0", SZ_EP_DESC)
+        return ioctl(self.fd, USB_RAW_IOCTL_EP_ENABLE, buffer)
 
     def ep_disable(self, handle: int) -> None:
         # Handle travels in the ioctl argument (raw_gadget.c raw_ioctl_ep_disable: ``int i = value``);
@@ -161,27 +163,27 @@ class RawGadgetDevice:
     def ep_write(self, handle: int, data: bytes) -> int:
         return self._ep_io(USB_RAW_IOCTL_EP_WRITE, handle, data)[0]
 
-    def ep_read(self, handle: int, n: int) -> bytes:
-        return self._ep_io(USB_RAW_IOCTL_EP_READ, handle, b"", n)[1]
+    def ep_read(self, handle: int, length: int) -> bytes:
+        return self._ep_io(USB_RAW_IOCTL_EP_READ, handle, b"", length)[1]
 
     def configure(self) -> None:
         ioctl(self.fd, USB_RAW_IOCTL_CONFIGURE)
 
-    def vbus_draw(self, ma: int) -> None:
+    def vbus_draw(self, milliamps: int) -> None:
         # By value, in 2 mA units (raw_gadget.c raw_ioctl_vbus_draw: ``usb_gadget_vbus_draw(gadget,
         # 2 * value)``) — i.e. the same number as bMaxPower (250 for 500 mA), like the reference
         # examples' ``usb_raw_vbus_draw(fd, usb_config.bMaxPower)``.  dwc3 has no .vbus_draw ->
         # EOPNOTSUPP from the kernel; callers treat that as harmless.
-        ioctl(self.fd, USB_RAW_IOCTL_VBUS_DRAW, max(0, int(ma)) // 2)
+        ioctl(self.fd, USB_RAW_IOCTL_VBUS_DRAW, max(0, int(milliamps)) // 2)
 
     def eps_info(self) -> List[Tuple[str, int, int, int]]:
-        buf = ctypes.create_string_buffer(SZ_EPS_INFO)
-        n = ioctl(self.fd, USB_RAW_IOCTL_EPS_INFO, buf)
-        out = []
-        for i in range(n):
-            name, addr, caps, maxp = struct.unpack_from("<16sIIH", buf.raw, i * SZ_EP_INFO)
-            out.append((name.split(b"\0")[0].decode(errors="replace"), addr, caps, maxp))
-        return out
+        buffer = ctypes.create_string_buffer(SZ_EPS_INFO)
+        count = ioctl(self.fd, USB_RAW_IOCTL_EPS_INFO, buffer)
+        endpoints = []
+        for i in range(count):
+            name, address, capabilities, max_packet = struct.unpack_from("<16sIIH", buffer.raw, i * SZ_EP_INFO)
+            endpoints.append((name.split(b"\0")[0].decode(errors="replace"), address, capabilities, max_packet))
+        return endpoints
 
 
 class UsbRawGadgetTransport:
@@ -200,9 +202,9 @@ class UsbRawGadgetTransport:
         self.modprobe = modprobe
         self.log_control = log_control
         self.profile: Optional[Profile] = None
-        self.desc: Optional[GadgetDescriptors] = None
+        self.descriptors: Optional[GadgetDescriptors] = None
         self.on_feedback: Optional[FeedbackCallback] = None
-        self.dev: Optional[RawGadgetDevice] = None
+        self.device: Optional[RawGadgetDevice] = None
         self._slot = ReportSlot()
         self._metrics = TransportMetrics()
         self._stop = threading.Event()
@@ -231,16 +233,16 @@ class UsbRawGadgetTransport:
         if not self._configured:
             return False
         if self._udc_watch is not None:
-            st = self._udc_watch.state()
-            if st is not None and st != usb_role.UDC_STATE_CONFIGURED:
+            state = self._udc_watch.state()
+            if state is not None and state != usb_role.UDC_STATE_CONFIGURED:
                 return False
         return True
 
     def start(self, profile: Profile, on_feedback: Optional[FeedbackCallback] = None) -> None:
-        if self.dev is not None:
+        if self.device is not None:
             raise TransportError("transport already started")
         self.profile = profile
-        self.desc = profile.gadget_descriptors()
+        self.descriptors = profile.gadget_descriptors()
         self.on_feedback = on_feedback
         if not install_cancel_signal_handler():
             log.warning("cancel signal handler not installed (not main thread): teardown may be slow")
@@ -250,32 +252,32 @@ class UsbRawGadgetTransport:
             raise TransportError(f"{self.dev_path} missing (modprobe raw_gadget failed?)")
         udc = self.udc
         if udc is None:
-            udcs = usb_role.list_udcs(self.sysfs)
-            if not udcs:
+            udc_names = usb_role.list_udcs(self.sysfs)
+            if not udc_names:
                 raise TransportError("no UDC in /sys/class/udc: DRD disabled in BIOS, or Deck is USB host (dock attached?)")
-            udc = udcs[0]
+            udc = udc_names[0]
         self.udc = udc
         self._udc_watch = usb_role.UdcWatcher(udc, self.sysfs)
-        busy = usb_role.udc_attr("function", udc, self.sysfs)
-        if busy:
-            log.warning("UDC %s already has function %r bound (stale gadget?) — trying anyway", udc, busy)
+        bound_function = usb_role.udc_attr("function", udc, self.sysfs)
+        if bound_function:
+            log.warning("UDC %s already has function %r bound (stale gadget?) — trying anyway", udc, bound_function)
         try:
-            self.dev = RawGadgetDevice(self.dev_path)
+            self.device = RawGadgetDevice(self.dev_path)
         except OSError as exc:
             raise TransportError(f"cannot open {self.dev_path}: {exc}") from exc
         try:
-            self.dev.init(self.driver, udc, USB_SPEED[self.speed])
-            self.dev.run()
+            self.device.init(self.driver, udc, USB_SPEED[self.speed])
+            self.device.run()
         except OSError as exc:
-            self.dev.close()
-            self.dev = None
+            self.device.close()
+            self.device = None
             raise TransportError(f"raw-gadget init/run failed on {udc}: {exc}") from exc
         self._stop.clear()
         self._error = None
         self._event_thread = threading.Thread(target=self._event_loop, name="rawgadget-ev", daemon=True)
         self._event_thread.start()
         log.info("raw-gadget up: udc=%s driver=%s speed=%s vid=%04x pid=%04x", udc, self.driver, self.speed,
-                 self.desc.vid, self.desc.pid)
+                 self.descriptors.vid, self.descriptors.pid)
 
     def send(self, report: bytes) -> None:
         if self._configured:
@@ -283,26 +285,26 @@ class UsbRawGadgetTransport:
 
     def stop(self) -> None:
         self._stop.set()
-        dev = self.dev
-        if dev is None:
+        device = self.device
+        if device is None:
             return
         # 1. event thread (blocked in EVENT_FETCH) -> EINTR
         join_with_interrupts([self._event_thread], timeout=1.5)
         # 2. data threads + endpoint disable
         self._teardown_eps(reason="stop")
         # 3. closing the fd unregisters the gadget driver; the UDC drops off the bus
-        self.dev = None
-        dev.close()
+        self.device = None
+        device.close()
         self._event_thread = None
         log.info("raw-gadget down (sent=%d dropped=%d)", self._metrics.sent, self._slot.dropped)
 
     # --- event loop ------------------------------------------------------------------
     def _event_loop(self) -> None:
-        dev = self.dev
-        assert dev is not None
+        device = self.device
+        assert device is not None
         while not self._stop.is_set():
             try:
-                typ, data = dev.event_fetch()
+                event_type, data = device.event_fetch()
             except OSError as exc:
                 if exc.errno == errno.EINTR or self._stop.is_set():
                     if self._stop.is_set():
@@ -313,40 +315,40 @@ class UsbRawGadgetTransport:
                 self._configured = False
                 break
             try:
-                if typ == USB_RAW_EVENT_CONTROL:
+                if event_type == USB_RAW_EVENT_CONTROL:
                     self._handle_control(data)
-                elif typ == USB_RAW_EVENT_CONNECT:
+                elif event_type == USB_RAW_EVENT_CONNECT:
                     try:
-                        log.info("CONNECT; eps=%s", dev.eps_info())
+                        log.info("CONNECT; eps=%s", device.eps_info())
                     except OSError:
                         log.info("CONNECT")
-                elif typ == USB_RAW_EVENT_RESET:
+                elif event_type == USB_RAW_EVENT_RESET:
                     log.info("RESET")
                     self._teardown_eps(reason="reset")
-                elif typ == USB_RAW_EVENT_DISCONNECT:
+                elif event_type == USB_RAW_EVENT_DISCONNECT:
                     log.info("DISCONNECT")
                     self._teardown_eps(reason="disconnect")
-                elif typ == USB_RAW_EVENT_SUSPEND:
+                elif event_type == USB_RAW_EVENT_SUSPEND:
                     log.info("SUSPEND")
-                elif typ == USB_RAW_EVENT_RESUME:
+                elif event_type == USB_RAW_EVENT_RESUME:
                     log.info("RESUME")
                 else:
-                    log.debug("event %d len=%d", typ, len(data))
+                    log.debug("event %d len=%d", event_type, len(data))
             except OSError as exc:
                 if exc.errno == errno.EINTR and self._stop.is_set():
                     break
-                log.warning("error while handling %s: %s", EVENT_NAMES.get(typ, typ), exc)
-                if typ == USB_RAW_EVENT_CONTROL:
-                    self._abort_control(dev)
+                log.warning("error while handling %s: %s", EVENT_NAMES.get(event_type, event_type), exc)
+                if event_type == USB_RAW_EVENT_CONTROL:
+                    self._abort_control(device)
             except Exception as exc:  # noqa: BLE001 - keep the event loop alive, but record it
                 log.exception("unhandled error in raw-gadget event loop: %s", exc)
                 self._error = exc
-                if typ == USB_RAW_EVENT_CONTROL:
-                    self._abort_control(dev)
+                if event_type == USB_RAW_EVENT_CONTROL:
+                    self._abort_control(device)
                 break
 
     @staticmethod
-    def _abort_control(dev: RawGadgetDevice) -> None:
+    def _abort_control(device: RawGadgetDevice) -> None:
         """Terminate a half-handled EP0 request with STALL (best effort).
 
         raw-gadget keeps ``ep0_in_pending``/``ep0_out_pending`` set until an EP0 read/write
@@ -356,15 +358,15 @@ class UsbRawGadgetTransport:
         (the reply had already gone out), which is fine.
         """
         try:
-            dev.ep0_stall()
+            device.ep0_stall()
         except OSError as exc:
             log.debug("ep0_stall after failed control handling: %s", exc)
 
     def _handle_control(self, raw: bytes) -> None:
-        dev = self.dev
-        desc = self.desc
+        device = self.device
+        descriptors = self.descriptors
         profile = self.profile
-        assert dev is not None and desc is not None and profile is not None
+        assert device is not None and descriptors is not None and profile is not None
         setup = SetupPacket.unpack(raw)
         self.control_requests += 1
         if self.log_control:
@@ -376,44 +378,45 @@ class UsbRawGadgetTransport:
             # so EP0_WRITE would fail with EBUSY ("wrong direction"): there is no data stage —
             # complete it with the zero-length status read, exactly like ack().
             if setup.wLength == 0:
-                dev.ep0_read(0)
+                device.ep0_read(0)
             else:
-                dev.ep0_write(bytes(data[:setup.wLength]))
+                device.ep0_write(bytes(data[:setup.wLength]))
 
         def ack() -> None:
-            dev.ep0_read(0)
+            device.ep0_read(0)
 
         def stall() -> None:
-            dev.ep0_stall()
+            device.ep0_stall()
 
         def read_data() -> bytes:
-            return dev.ep0_read(setup.wLength) if setup.wLength else b""
+            return device.ep0_read(setup.wLength) if setup.wLength else b""
 
         if setup.req_type == USB_TYPE_STANDARD and setup.recipient == USB_RECIP_DEVICE:
-            req = setup.bRequest
-            if req == USB_REQ_GET_DESCRIPTOR and setup.dir_in:
-                dtype, dindex = setup.wValue >> 8, setup.wValue & 0xFF
-                if dtype == USB_DT_DEVICE:
-                    return reply(desc.device_descriptor())
-                if dtype == USB_DT_CONFIG:
-                    return reply(desc.config_descriptor(USB_DT_CONFIG))
-                if dtype == USB_DT_STRING:
-                    sd = desc.string(dindex)
-                    return reply(sd) if sd else stall()
-                if dtype == USB_DT_DEVICE_QUALIFIER:
-                    return reply(desc.qualifier_descriptor()) if desc.high_speed and self.speed == "high" else stall()
-                if dtype == USB_DT_OTHER_SPEED_CONFIG:
-                    return (reply(desc.config_descriptor(USB_DT_OTHER_SPEED_CONFIG))
-                            if desc.high_speed and self.speed == "high" else stall())
+            request = setup.bRequest
+            if request == USB_REQ_GET_DESCRIPTOR and setup.dir_in:
+                descriptor_type, descriptor_index = setup.wValue >> 8, setup.wValue & 0xFF
+                if descriptor_type == USB_DT_DEVICE:
+                    return reply(descriptors.device_descriptor())
+                if descriptor_type == USB_DT_CONFIG:
+                    return reply(descriptors.config_descriptor(USB_DT_CONFIG))
+                if descriptor_type == USB_DT_STRING:
+                    string_descriptor = descriptors.string(descriptor_index)
+                    return reply(string_descriptor) if string_descriptor else stall()
+                if descriptor_type == USB_DT_DEVICE_QUALIFIER:
+                    return (reply(descriptors.qualifier_descriptor())
+                            if descriptors.high_speed and self.speed == "high" else stall())
+                if descriptor_type == USB_DT_OTHER_SPEED_CONFIG:
+                    return (reply(descriptors.config_descriptor(USB_DT_OTHER_SPEED_CONFIG))
+                            if descriptors.high_speed and self.speed == "high" else stall())
                 return stall()  # BOS, MS OS 0xEE, ... -> STALL (accepted by Linux & Windows, see spike)
-            if req == USB_REQ_SET_CONFIGURATION and not setup.dir_in:
+            if request == USB_REQ_SET_CONFIGURATION and not setup.dir_in:
                 self._set_configuration(setup.wValue & 0xFF)
                 return ack()
-            if req == USB_REQ_GET_CONFIGURATION and setup.dir_in:
+            if request == USB_REQ_GET_CONFIGURATION and setup.dir_in:
                 return reply(bytes([1 if self._configured else 0]))
-            if req == USB_REQ_GET_STATUS and setup.dir_in:
+            if request == USB_REQ_GET_STATUS and setup.dir_in:
                 return reply(b"\x00\x00")
-            if req in (USB_REQ_CLEAR_FEATURE, USB_REQ_SET_FEATURE) and not setup.dir_in:
+            if request in (USB_REQ_CLEAR_FEATURE, USB_REQ_SET_FEATURE) and not setup.dir_in:
                 return ack()
             return stall()
         if setup.req_type == USB_TYPE_STANDARD and setup.bRequest in (USB_REQ_SET_INTERFACE, USB_REQ_GET_INTERFACE,
@@ -443,16 +446,16 @@ class UsbRawGadgetTransport:
             self._teardown_eps(reason="reconfigure")
             if value == 0:
                 return
-            dev, desc = self.dev, self.desc
-            assert dev is not None and desc is not None
+            device, descriptors = self.device, self.descriptors
+            assert device is not None and descriptors is not None
             try:
-                self._ep_in = dev.ep_enable(desc.ep_in)
-                self._ep_out = dev.ep_enable(desc.ep_out) if desc.ep_out else None
+                self._ep_in = device.ep_enable(descriptors.ep_in)
+                self._ep_out = device.ep_enable(descriptors.ep_out) if descriptors.ep_out else None
                 try:
-                    dev.vbus_draw(desc.max_power_ma)
+                    device.vbus_draw(descriptors.max_power_ma)
                 except OSError as exc:
                     log.debug("vbus_draw: %s", exc)   # dwc3: EOPNOTSUPP (no .vbus_draw) — harmless
-                dev.configure()
+                device.configure()
             except OSError as exc:
                 # Free whatever got enabled so the host's retry starts from a clean slate; the
                 # event loop STALLs the pending SET_CONFIGURATION.
@@ -462,12 +465,12 @@ class UsbRawGadgetTransport:
             self.generation += 1
             self._slot.clear()
             self._configured = True
-            gen = self.generation
-            self._in_thread = threading.Thread(target=self._in_loop, args=(self._ep_in, gen),
+            generation = self.generation
+            self._in_thread = threading.Thread(target=self._in_loop, args=(self._ep_in, generation),
                                                name="rawgadget-in", daemon=True)
             self._in_thread.start()
             if self._ep_out is not None:
-                self._out_thread = threading.Thread(target=self._out_loop, args=(self._ep_out, gen),
+                self._out_thread = threading.Thread(target=self._out_loop, args=(self._ep_out, generation),
                                                     name="rawgadget-out", daemon=True)
                 self._out_thread.start()
             log.info("configured: ep_in handle=%s ep_out handle=%s", self._ep_in, self._ep_out)
@@ -481,20 +484,20 @@ class UsbRawGadgetTransport:
             joined = join_with_interrupts(threads, timeout=1.0)
             if not joined:
                 log.warning("data threads did not exit in time (%s)", reason)
-            dev = self.dev
+            device = self.device
             handles, self._ep_in, self._ep_out = (self._ep_in, self._ep_out), None, None
-            if dev is None:
+            if device is None:
                 return
             # With the data threads joined no URB can be queued, so one EP_DISABLE per handle is
             # enough.  Only while a thread is still stuck in EP_READ/EP_WRITE may the kernel answer
             # EINVAL ("waiting for urb completion") — retry briefly in that case alone.
             attempts = 1 if joined else 10
-            for h in handles:
-                if h is None:
+            for handle in handles:
+                if handle is None:
                     continue
                 for attempt in range(1, attempts + 1):
                     try:
-                        dev.ep_disable(h)
+                        device.ep_disable(handle)
                         break
                     except OSError as exc:
                         if exc.errno == errno.EINVAL and attempt < attempts:
@@ -502,30 +505,30 @@ class UsbRawGadgetTransport:
                             continue
                         if exc.errno in (errno.EINVAL, errno.EBUSY):
                             # EINVAL: already disabled; EBUSY: gadget already unbound — expected
-                            log.debug("ep_disable(%s) after %s: %s", h, reason, exc)
+                            log.debug("ep_disable(%s) after %s: %s", handle, reason, exc)
                         else:
-                            log.warning("ep_disable(%s) after %s failed: %s", h, reason, exc)
+                            log.warning("ep_disable(%s) after %s failed: %s", handle, reason, exc)
                         break
 
-    def _in_loop(self, handle: int, gen: int) -> None:
-        dev = self.dev
-        assert dev is not None
-        desc = self.desc
-        maxp = desc.ep_in_max_packet if desc else 64
-        buf = ctypes.create_string_buffer(SZ_EP_IO + maxp)
-        base = ctypes.addressof(buf) + SZ_EP_IO
+    def _in_loop(self, handle: int, generation: int) -> None:
+        device = self.device
+        assert device is not None
+        descriptors = self.descriptors
+        max_packet = descriptors.ep_in_max_packet if descriptors else 64
+        buffer = ctypes.create_string_buffer(SZ_EP_IO + max_packet)
+        payload_address = ctypes.addressof(buffer) + SZ_EP_IO
         slot = self._slot
-        fd = dev.fd
+        fd = device.fd
         sent = 0
-        while self._configured and not self._stop.is_set() and self.generation == gen:
-            rep = slot.take(0.25)
-            if rep is None:
+        while self._configured and not self._stop.is_set() and self.generation == generation:
+            report = slot.take(0.25)
+            if report is None:
                 continue
-            n = min(len(rep), maxp)
-            struct.pack_into("<HHI", buf, 0, handle, 0, n)
-            ctypes.memmove(base, rep, n)
+            length = min(len(report), max_packet)
+            struct.pack_into("<HHI", buffer, 0, handle, 0, length)
+            ctypes.memmove(payload_address, report, length)
             try:
-                ioctl(fd, USB_RAW_IOCTL_EP_WRITE, buf)
+                ioctl(fd, USB_RAW_IOCTL_EP_WRITE, buffer)
                 sent += 1
                 self._metrics.sent += 1
             except OSError as exc:
@@ -539,15 +542,15 @@ class UsbRawGadgetTransport:
                 break
         log.debug("IN loop ended after %d reports", sent)
 
-    def _out_loop(self, handle: int, gen: int) -> None:
-        dev = self.dev
-        assert dev is not None
-        desc = self.desc
+    def _out_loop(self, handle: int, generation: int) -> None:
+        device = self.device
+        assert device is not None
+        descriptors = self.descriptors
         profile = self.profile
-        maxp = desc.ep_out_max_packet if desc else 64
-        while self._configured and not self._stop.is_set() and self.generation == gen:
+        max_packet = descriptors.ep_out_max_packet if descriptors else 64
+        while self._configured and not self._stop.is_set() and self.generation == generation:
             try:
-                data = dev.ep_read(handle, maxp)
+                data = device.ep_read(handle, max_packet)
             except OSError as exc:
                 if exc.errno == errno.EINTR:
                     continue
@@ -560,16 +563,16 @@ class UsbRawGadgetTransport:
                 continue
             self._metrics.out_reports += 1
             try:
-                fb = profile.on_output(data)
+                feedback = profile.on_output(data)
             except Exception as exc:  # noqa: BLE001
                 log.warning("on_output failed: %s", exc)
                 continue
-            if fb is None:
+            if feedback is None:
                 continue
-            log.debug("host -> %s: %s", fb.kind, data.hex())
+            log.debug("host -> %s: %s", feedback.kind, data.hex())
             if self.on_feedback is not None:
                 try:
-                    self.on_feedback(fb)
+                    self.on_feedback(feedback)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("feedback callback failed: %s", exc)
         log.debug("OUT loop ended")

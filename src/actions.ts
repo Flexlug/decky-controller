@@ -161,8 +161,8 @@ export function onStatusEvent(status: unknown): void {
 
 /** Handler for the backend `toast` event. */
 export function onToastEvent(event: unknown): void {
-  const t = (event ?? {}) as Partial<ToastEvent>;
+  const toast = (event ?? {}) as Partial<ToastEvent>;
   const severity: ToastEvent["severity"] =
-    t.severity === "error" || t.severity === "warn" ? t.severity : "info";
-  notify(String(t.body ?? ""), severity, t.title ? String(t.title) : PLUGIN_TITLE);
+    toast.severity === "error" || toast.severity === "warn" ? toast.severity : "info";
+  notify(String(toast.body ?? ""), severity, toast.title ? String(toast.title) : PLUGIN_TITLE);
 }

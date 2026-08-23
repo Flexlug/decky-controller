@@ -57,8 +57,8 @@ class ReportSlot:
         with self._cond:
             if self._report is None:
                 self._cond.wait(timeout)
-            rep, self._report = self._report, None
-            return rep
+            report, self._report = self._report, None
+            return report
 
     def clear(self) -> None:
         with self._cond:
@@ -100,12 +100,13 @@ def join_with_interrupts(threads, timeout: float, interval: float = 0.05) -> boo
     import time
 
     deadline = time.monotonic() + timeout
-    alive = [t for t in threads if t is not None and t.is_alive() and t is not threading.current_thread()]
+    alive = [thread for thread in threads
+             if thread is not None and thread.is_alive() and thread is not threading.current_thread()]
     while alive:
-        for t in alive:
-            interrupt_thread(t)
-            t.join(interval)
-        alive = [t for t in alive if t.is_alive()]
+        for thread in alive:
+            interrupt_thread(thread)
+            thread.join(interval)
+        alive = [thread for thread in alive if thread.is_alive()]
         if alive and time.monotonic() >= deadline:
             return False
     return True

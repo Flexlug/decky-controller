@@ -80,20 +80,20 @@ _HAT_TABLE = {
  HB_L4, HB_L5, HB_R4, HB_R5) = range(1, 17)
 
 
-def _hb(n: int) -> int:
-    return 1 << (n - 1)
+def _hid_button_bit(number: int) -> int:
+    return 1 << (number - 1)
 
 
 HB_BY_TARGET: Dict[str, int] = {
-    "A": _hb(HB_A), "B": _hb(HB_B), "X": _hb(HB_X), "Y": _hb(HB_Y), "LB": _hb(HB_L1), "RB": _hb(HB_R1),
-    "L3": _hb(HB_L3), "R3": _hb(HB_R3), "VIEW": _hb(HB_VIEW), "MENU": _hb(HB_MENU),
+    "A": _hid_button_bit(HB_A), "B": _hid_button_bit(HB_B), "X": _hid_button_bit(HB_X), "Y": _hid_button_bit(HB_Y), "LB": _hid_button_bit(HB_L1), "RB": _hid_button_bit(HB_R1),
+    "L3": _hid_button_bit(HB_L3), "R3": _hid_button_bit(HB_R3), "VIEW": _hid_button_bit(HB_VIEW), "MENU": _hid_button_bit(HB_MENU),
 }
 DEFAULT_BUTTON_MAP = (
-    (S.BTN_A, _hb(HB_A)), (S.BTN_B, _hb(HB_B)), (S.BTN_X, _hb(HB_X)), (S.BTN_Y, _hb(HB_Y)),
-    (S.BTN_L1, _hb(HB_L1)), (S.BTN_R1, _hb(HB_R1)), (S.BTN_L3, _hb(HB_L3)), (S.BTN_R3, _hb(HB_R3)),
-    (S.BTN_VIEW, _hb(HB_VIEW)), (S.BTN_MENU, _hb(HB_MENU)),
+    (S.BTN_A, _hid_button_bit(HB_A)), (S.BTN_B, _hid_button_bit(HB_B)), (S.BTN_X, _hid_button_bit(HB_X)), (S.BTN_Y, _hid_button_bit(HB_Y)),
+    (S.BTN_L1, _hid_button_bit(HB_L1)), (S.BTN_R1, _hid_button_bit(HB_R1)), (S.BTN_L3, _hid_button_bit(HB_L3)), (S.BTN_R3, _hid_button_bit(HB_R3)),
+    (S.BTN_VIEW, _hid_button_bit(HB_VIEW)), (S.BTN_MENU, _hid_button_bit(HB_MENU)),
 )
-PADDLE_DEFAULT = {"L4": _hb(HB_L4), "L5": _hb(HB_L5), "R4": _hb(HB_R4), "R5": _hb(HB_R5)}
+PADDLE_DEFAULT = {"L4": _hid_button_bit(HB_L4), "L5": _hid_button_bit(HB_L5), "R4": _hid_button_bit(HB_R4), "R5": _hid_button_bit(HB_R5)}
 PADDLE_BITS = {"L4": S.BTN_L4, "L5": S.BTN_L5, "R4": S.BTN_R4, "R5": S.BTN_R5}
 DPAD_TARGETS = {"DPAD_UP": S.BTN_DPAD_UP, "DPAD_DOWN": S.BTN_DPAD_DOWN,
                 "DPAD_LEFT": S.BTN_DPAD_LEFT, "DPAD_RIGHT": S.BTN_DPAD_RIGHT}
@@ -107,7 +107,7 @@ HID_DESC = bytes([9, USB_DT_HID, 0x11, 0x01, 0x00, 0x01, USB_DT_HID_REPORT,
 CONFIG_BODY = bytes([9, 4, 0, 0, 2, 0x03, 0x00, 0x00, 0]) + HID_DESC + EP_IN_DESC + EP_OUT_DESC
 
 DESCRIPTORS = GadgetDescriptors(
-    vid=VID, pid=PID, bcd_device=0x0100, bcd_usb=0x0200, dev_class=0, dev_subclass=0, dev_protocol=0,
+    vid=VID, pid=PID, bcd_device=0x0100, bcd_usb=0x0200, device_class=0, device_subclass=0, device_protocol=0,
     manufacturer="Decky Controller", product="Steam Deck Gamepad", serial="DECK0001",
     config_body=CONFIG_BODY, num_interfaces=1, config_attributes=0xA0, max_power_ma=500,
     ep_in=EP_IN_DESC, ep_out=EP_OUT_DESC, high_speed=True,
@@ -122,9 +122,9 @@ HID_REQ_SET_IDLE = 0x0A
 HID_REQ_SET_PROTOCOL = 0x0B
 
 
-def s16_to_s8(v: int) -> int:
-    v = S.clamp_s16(v) >> 8
-    return -127 if v < -127 else v
+def s16_to_s8(value: int) -> int:
+    value = S.clamp_s16(value) >> 8
+    return -127 if value < -127 else value
 
 
 def trigger_to_s8(raw: int) -> int:
@@ -147,9 +147,9 @@ class HidGamepadProfile:
                  forward_qam: bool = False) -> None:
         table = list(DEFAULT_BUTTON_MAP)
         if forward_steam:
-            table.append((S.BTN_STEAM, _hb(HB_STEAM)))
+            table.append((S.BTN_STEAM, _hid_button_bit(HB_STEAM)))
         if forward_qam:
-            table.append((S.BTN_QAM, _hb(HB_QAM)))
+            table.append((S.BTN_QAM, _hid_button_bit(HB_QAM)))
         dpad_extra = []  # paddle -> D-pad direction (routed through the hat)
         for paddle, default_bit in PADDLE_DEFAULT.items():
             target = str((paddles or {}).get(paddle, "none")).upper()
@@ -169,18 +169,19 @@ class HidGamepadProfile:
 
     def pack(self, state: ControllerState) -> bytes:
         buttons = state.buttons
-        hb = 0
-        for src, dst in self._table:
-            if buttons & src:
-                hb |= dst
-        for src, dst in self._dpad_extra:
-            if buttons & src:
-                buttons |= dst
+        hid_buttons = 0
+        for canonical_bit, hid_bit in self._table:
+            if buttons & canonical_bit:
+                hid_buttons |= hid_bit
+        for canonical_bit, dpad_bit in self._dpad_extra:
+            if buttons & canonical_bit:
+                buttons |= dpad_bit
         # HID Y axes are +down; the Deck reports +up.
-        rep = _REPORT.pack(s16_to_s8(state.lx), s16_to_s8(-state.ly), s16_to_s8(state.rx), s16_to_s8(-state.ry),
-                           trigger_to_s8(state.lt), trigger_to_s8(state.rt), hat_from_buttons(buttons), hb)
-        self._last_report = rep
-        return rep
+        report = _REPORT.pack(s16_to_s8(state.lx), s16_to_s8(-state.ly), s16_to_s8(state.rx), s16_to_s8(-state.ry),
+                              trigger_to_s8(state.lt), trigger_to_s8(state.rt), hat_from_buttons(buttons),
+                              hid_buttons)
+        self._last_report = report
+        return report
 
     def on_output(self, data: bytes) -> Optional[Feedback]:
         return Feedback("unknown", raw=bytes(data)) if data else None
@@ -197,30 +198,30 @@ class HidGamepadProfile:
         if setup.req_type == USB_TYPE_STANDARD:
             if (setup.bRequest == USB_REQ_GET_DESCRIPTOR and setup.dir_in
                     and setup.recipient == USB_RECIP_INTERFACE):
-                dtype = setup.wValue >> 8
-                if dtype == USB_DT_HID_REPORT:
+                descriptor_type = setup.wValue >> 8
+                if descriptor_type == USB_DT_HID_REPORT:
                     return REPORT_DESC
-                if dtype == USB_DT_HID:
+                if descriptor_type == USB_DT_HID:
                     return HID_DESC
             return None
         if setup.req_type != USB_TYPE_CLASS:
             return None
-        req = setup.bRequest
+        request = setup.bRequest
         if setup.dir_in:
-            if req == HID_REQ_GET_REPORT:
+            if request == HID_REQ_GET_REPORT:
                 return self._last_report
-            if req == HID_REQ_GET_IDLE:
+            if request == HID_REQ_GET_IDLE:
                 return bytes([self._idle])
-            if req == HID_REQ_GET_PROTOCOL:
+            if request == HID_REQ_GET_PROTOCOL:
                 return bytes([self._protocol])
             return None
-        if req == HID_REQ_SET_IDLE:
+        if request == HID_REQ_SET_IDLE:
             self._idle = setup.wValue >> 8
             return b""
-        if req == HID_REQ_SET_PROTOCOL:
+        if request == HID_REQ_SET_PROTOCOL:
             self._protocol = setup.wValue & 0xFF
             return b""
-        if req == HID_REQ_SET_REPORT:
+        if request == HID_REQ_SET_REPORT:
             data = read_data() if setup.wLength else b""
             self.on_output(data)
             return b""

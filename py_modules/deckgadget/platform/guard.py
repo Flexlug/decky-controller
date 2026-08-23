@@ -44,7 +44,7 @@ def list_gadgets(configfs: str = CONFIGFS, prefix: str = GADGET_PREFIX) -> List[
     """Gadget directories created by us (``usb_gadget/<prefix>*``)."""
     base = os.path.join(configfs, "usb_gadget")
     try:
-        return sorted(os.path.join(base, d) for d in os.listdir(base) if d.startswith(prefix))
+        return sorted(os.path.join(base, name) for name in os.listdir(base) if name.startswith(prefix))
     except OSError:
         return []
 
@@ -68,11 +68,11 @@ def _sweep_quiet(path: str) -> None:
         for name in files:
             _unlink_quiet(os.path.join(root, name))
         for name in dirs:
-            p = os.path.join(root, name)
-            if os.path.islink(p):
-                _unlink_quiet(p)
+            entry_path = os.path.join(root, name)
+            if os.path.islink(entry_path):
+                _unlink_quiet(entry_path)
             else:
-                _rmdir_quiet(p)
+                _rmdir_quiet(entry_path)
     _rmdir_quiet(path)
 
 
@@ -93,18 +93,18 @@ def remove_configfs_gadget(gadget_dir: str) -> Dict[str, object]:
         report["unbound"] = False if exc.errno == errno.ENODEV else f"error: {exc}"
     # Order matters on configfs: function symlinks first, then config strings/configs,
     # then functions, then gadget strings, finally the gadget directory itself.
-    for cfg in sorted(glob.glob(os.path.join(gadget_dir, "configs", "*"))):
-        for entry in sorted(os.listdir(cfg)):
-            p = os.path.join(cfg, entry)
-            if os.path.islink(p):
-                _unlink_quiet(p)
-        for s in sorted(glob.glob(os.path.join(cfg, "strings", "*"))):
-            _rmdir_quiet(s)
-        _rmdir_quiet(cfg)
-    for fn in sorted(glob.glob(os.path.join(gadget_dir, "functions", "*"))):
-        _rmdir_quiet(fn)
-    for s in sorted(glob.glob(os.path.join(gadget_dir, "strings", "*"))):
-        _rmdir_quiet(s)
+    for config_dir in sorted(glob.glob(os.path.join(gadget_dir, "configs", "*"))):
+        for entry in sorted(os.listdir(config_dir)):
+            entry_path = os.path.join(config_dir, entry)
+            if os.path.islink(entry_path):
+                _unlink_quiet(entry_path)
+        for strings_dir in sorted(glob.glob(os.path.join(config_dir, "strings", "*"))):
+            _rmdir_quiet(strings_dir)
+        _rmdir_quiet(config_dir)
+    for function_dir in sorted(glob.glob(os.path.join(gadget_dir, "functions", "*"))):
+        _rmdir_quiet(function_dir)
+    for strings_dir in sorted(glob.glob(os.path.join(gadget_dir, "strings", "*"))):
+        _rmdir_quiet(strings_dir)
     if not _rmdir_quiet(gadget_dir):
         _sweep_quiet(gadget_dir)
     report["removed"] = not os.path.exists(gadget_dir)
@@ -121,23 +121,23 @@ def wake_display(gamescope: Optional[ScreenMethod] = None, kscreen: Optional[Scr
     compositor was reachable, ``woken``.  Failures are appended to ``warnings`` (never raised).
     """
     warnings = warnings if warnings is not None else []
-    out: Dict[str, object] = {}
-    for m in (gamescope if gamescope is not None else GamescopeSleep(),
-              kscreen if kscreen is not None else KscreenDpms()):
+    result: Dict[str, object] = {}
+    for method in (gamescope if gamescope is not None else GamescopeSleep(),
+                   kscreen if kscreen is not None else KscreenDpms()):
         entry: Dict[str, object] = {"available": False}
         try:
-            if m.available():
+            if method.available():
                 entry["available"] = True
-                entry["socket"] = getattr(m, "socket_path", None)
-                woken = bool(m.wake())
+                entry["socket"] = getattr(method, "socket_path", None)
+                woken = bool(method.wake())
                 entry["woken"] = woken
                 if not woken:
-                    warnings.append(f"{m.name}: display wake failed")
+                    warnings.append(f"{method.name}: display wake failed")
         except Exception as exc:  # noqa: BLE001
             entry["error"] = str(exc)
-            warnings.append(f"{m.name}: {exc}")
-        out[m.name] = entry
-    return out
+            warnings.append(f"{method.name}: {exc}")
+        result[method.name] = entry
+    return result
 
 
 def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
@@ -155,11 +155,11 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
     warnings: List[str] = report["warnings"]  # type: ignore[assignment]
 
     # 1. configfs gadgets
-    for g in list_gadgets(configfs, gadget_prefix):
+    for gadget_dir in list_gadgets(configfs, gadget_prefix):
         try:
-            report["gadgets"].append(remove_configfs_gadget(g))  # type: ignore[union-attr]
+            report["gadgets"].append(remove_configfs_gadget(gadget_dir))  # type: ignore[union-attr]
         except Exception as exc:  # noqa: BLE001
-            errors.append(f"gadget {g}: {exc}")
+            errors.append(f"gadget {gadget_dir}: {exc}")
 
     # 2. raw-gadget: owned by the (now dead) daemon process; nothing persistent to undo.
 
@@ -175,16 +175,17 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
             # Verify instead of trusting the writes: a failed/ignored ``bind`` would otherwise leave
             # the Deck without its controller while we report success.  ``bind``/``drivers_probe``
             # probe synchronously, so a re-scan right away is authoritative.
-            after = neptune_mod.find_neptune(sysfs, dev)
-            still = ([itf.name for n in neptune_mod.CAPTURE_INTERFACES
-                      if (itf := after.interface(n)) is not None and itf.driver != neptune_mod.USBHID_DRIVER]
-                     if after is not None else [])
+            rescanned = neptune_mod.find_neptune(sysfs, dev)
+            still_captured = ([interface.name for number in neptune_mod.CAPTURE_INTERFACES
+                               if (interface := rescanned.interface(number)) is not None
+                               and interface.driver != neptune_mod.USBHID_DRIVER]
+                              if rescanned is not None else [])
             report["neptune"] = {"present": True, "name": device.name, "rebound": rebound,
-                                 "still_captured": still}
-            for e in bind_errors:
-                errors.append(f"neptune: {e}")
-            if still:
-                errors.append(f"neptune: interfaces still detached from usbhid: {', '.join(still)}")
+                                 "still_captured": still_captured}
+            for bind_error in bind_errors:
+                errors.append(f"neptune: {bind_error}")
+            if still_captured:
+                errors.append(f"neptune: interfaces still detached from usbhid: {', '.join(still_captured)}")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"neptune: {exc}")
 
@@ -196,13 +197,13 @@ def recover(sysfs: str = "/sys", configfs: str = CONFIGFS, dev: str = "/dev",
 
     # 5. backlight
     try:
-        bl = Backlight(backlight_dir, state_file or default_state_file())
-        restored = bl.restore(forget=True)
-        report["backlight"] = {"available": bl.available, "restored": restored}
+        backlight = Backlight(backlight_dir, state_file or default_state_file())
+        restored = backlight.restore(forget=True)
+        report["backlight"] = {"available": backlight.available, "restored": restored}
     except Exception as exc:  # noqa: BLE001
         errors.append(f"backlight: {exc}")
 
-    for w in warnings:
-        log.warning("recover: %s", w)
+    for warning in warnings:
+        log.warning("recover: %s", warning)
     report["ok"] = not errors
     return report

@@ -69,6 +69,6 @@ export const store = {
 /** React hook: re-renders the caller whenever the store changes. */
 export function useStore(): StoreState {
   const [, bump] = useState(0);
-  useEffect(() => store.subscribe(() => bump((n) => n + 1)), []);
+  useEffect(() => store.subscribe(() => bump((count) => count + 1)), []);
   return state;
 }

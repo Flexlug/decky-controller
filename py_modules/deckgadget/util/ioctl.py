@@ -30,10 +30,11 @@ IOC_READ = 2
 
 def _ioc(direction: int, type_: Union[str, int], nr: int, size: int) -> int:
     """``_IOC(dir, type, nr, size)`` from asm-generic/ioctl.h."""
-    t = ord(type_) if isinstance(type_, str) else type_
+    type_code = ord(type_) if isinstance(type_, str) else type_
     if not 0 <= size < (1 << _IOC_SIZEBITS):
         raise ValueError(f"ioctl size {size} does not fit in {_IOC_SIZEBITS} bits")
-    return (direction << _IOC_DIRSHIFT) | (size << _IOC_SIZESHIFT) | (t << _IOC_TYPESHIFT) | (nr << _IOC_NRSHIFT)
+    return ((direction << _IOC_DIRSHIFT) | (size << _IOC_SIZESHIFT) | (type_code << _IOC_TYPESHIFT)
+            | (nr << _IOC_NRSHIFT))
 
 
 def IO(type_: Union[str, int], nr: int) -> int:  # noqa: N802 - mirrors the C macro name
@@ -78,17 +79,17 @@ def ioctl(fd: int, request: int, arg: Optional[object] = None) -> int:
     Returns the non-negative ioctl result.
     """
     if arg is None:
-        argp: object = ctypes.c_void_p(0)
+        arg_pointer: object = ctypes.c_void_p(0)
     elif isinstance(arg, (ctypes.Array, ctypes.Structure, ctypes.Union, ctypes._SimpleCData)):
-        argp = ctypes.c_void_p(ctypes.addressof(arg))   # pointer to the caller-owned buffer
+        arg_pointer = ctypes.c_void_p(ctypes.addressof(arg))   # pointer to the caller-owned buffer
     elif isinstance(arg, int):
-        argp = ctypes.c_void_p(arg)
+        arg_pointer = ctypes.c_void_p(arg)
     else:
-        argp = arg
+        arg_pointer = arg
     # ctypes performs its own errno save/restore when use_errno=True.
     ctypes.set_errno(0)
-    ret = _get_libc().ioctl(fd, ctypes.c_ulong(request), argp)
-    if ret < 0:
-        err = ctypes.get_errno()
-        raise OSError(err, os.strerror(err))
-    return ret
+    result = _get_libc().ioctl(fd, ctypes.c_ulong(request), arg_pointer)
+    if result < 0:
+        errno_value = ctypes.get_errno()
+        raise OSError(errno_value, os.strerror(errno_value))
+    return result

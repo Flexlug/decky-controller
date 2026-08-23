@@ -54,7 +54,7 @@ class Interface:
     name: str             # e.g. "3-3:1.2"
     number: int
     driver: Optional[str] # currently bound driver (basename of the ``driver`` symlink) or None
-    cls: int = 0
+    usb_class: int = 0
     subclass: int = 0
     protocol: int = 0
     endpoints: List[Endpoint] = field(default_factory=list)
@@ -64,9 +64,9 @@ class Interface:
         return self.driver is not None
 
     def interrupt_in(self) -> Optional[Endpoint]:
-        for ep in self.endpoints:
-            if ep.is_in and ep.is_interrupt:
-                return ep
+        for endpoint in self.endpoints:
+            if endpoint.is_in and endpoint.is_interrupt:
+                return endpoint
         return None
 
 
@@ -87,9 +87,9 @@ class NeptuneDevice:
     @property
     def captured(self) -> bool:
         """True when any capture interface is *not* bound to usbhid (someone detached it)."""
-        for n in CAPTURE_INTERFACES:
-            itf = self.interfaces.get(n)
-            if itf is not None and itf.driver != USBHID_DRIVER:
+        for number in CAPTURE_INTERFACES:
+            interface = self.interfaces.get(number)
+            if interface is not None and interface.driver != USBHID_DRIVER:
                 return True
         return False
 
@@ -97,11 +97,13 @@ class NeptuneDevice:
         return {
             "name": self.name, "busnum": self.busnum, "devnum": self.devnum, "devnode": self.devnode,
             "product": self.product, "serial": self.serial, "captured": self.captured,
-            "interfaces": {str(n): {"name": i.name, "driver": i.driver, "class": i.cls,
-                                     "subclass": i.subclass, "protocol": i.protocol,
-                                     "endpoints": [f"0x{e.address:02x}/{'int' if e.is_interrupt else e.attributes}/"
-                                                   f"{e.max_packet}" for e in i.endpoints]}
-                           for n, i in sorted(self.interfaces.items())},
+            "interfaces": {str(number): {"name": interface.name, "driver": interface.driver,
+                                          "class": interface.usb_class, "subclass": interface.subclass,
+                                          "protocol": interface.protocol,
+                                          "endpoints": [f"0x{endpoint.address:02x}/"
+                                                        f"{'int' if endpoint.is_interrupt else endpoint.attributes}/"
+                                                        f"{endpoint.max_packet}" for endpoint in interface.endpoints]}
+                           for number, interface in sorted(self.interfaces.items())},
         }
 
 
@@ -114,40 +116,41 @@ def _parse_hex(text: Optional[str], default: int = 0) -> int:
         return default
 
 
-def _parse_interface(itf_path: str) -> Optional[Interface]:
-    number = read_text(os.path.join(itf_path, "bInterfaceNumber"))
+def _parse_interface(interface_path: str) -> Optional[Interface]:
+    number = read_text(os.path.join(interface_path, "bInterfaceNumber"))
     if number is None:
         return None
     driver = None
     try:
-        driver = os.path.basename(os.readlink(os.path.join(itf_path, "driver")))
+        driver = os.path.basename(os.readlink(os.path.join(interface_path, "driver")))
     except OSError:
         pass
-    eps: List[Endpoint] = []
+    endpoints: List[Endpoint] = []
     try:
-        entries = sorted(os.listdir(itf_path))
+        entries = sorted(os.listdir(interface_path))
     except OSError:
         entries = []
     for entry in entries:
         if not entry.startswith("ep_"):
             continue
-        ep_path = os.path.join(itf_path, entry)
-        addr = _parse_hex(read_text(os.path.join(ep_path, "bEndpointAddress")), -1)
-        if addr < 0:
+        endpoint_path = os.path.join(interface_path, entry)
+        address = _parse_hex(read_text(os.path.join(endpoint_path, "bEndpointAddress")), -1)
+        if address < 0:
             continue
-        eps.append(Endpoint(
-            address=addr,
-            attributes=_parse_hex(read_text(os.path.join(ep_path, "bmAttributes"))),
-            max_packet=_parse_hex(read_text(os.path.join(ep_path, "wMaxPacketSize"))),
-            interval=_parse_hex(read_text(os.path.join(ep_path, "bInterval"))),
-            direction=(read_text(os.path.join(ep_path, "direction")) or ("in" if addr & 0x80 else "out")).lower(),
+        endpoints.append(Endpoint(
+            address=address,
+            attributes=_parse_hex(read_text(os.path.join(endpoint_path, "bmAttributes"))),
+            max_packet=_parse_hex(read_text(os.path.join(endpoint_path, "wMaxPacketSize"))),
+            interval=_parse_hex(read_text(os.path.join(endpoint_path, "bInterval"))),
+            direction=(read_text(os.path.join(endpoint_path, "direction"))
+                       or ("in" if address & 0x80 else "out")).lower(),
         ))
     return Interface(
-        name=os.path.basename(itf_path), number=int(number, 16), driver=driver,
-        cls=_parse_hex(read_text(os.path.join(itf_path, "bInterfaceClass"))),
-        subclass=_parse_hex(read_text(os.path.join(itf_path, "bInterfaceSubClass"))),
-        protocol=_parse_hex(read_text(os.path.join(itf_path, "bInterfaceProtocol"))),
-        endpoints=eps,
+        name=os.path.basename(interface_path), number=int(number, 16), driver=driver,
+        usb_class=_parse_hex(read_text(os.path.join(interface_path, "bInterfaceClass"))),
+        subclass=_parse_hex(read_text(os.path.join(interface_path, "bInterfaceSubClass"))),
+        protocol=_parse_hex(read_text(os.path.join(interface_path, "bInterfaceProtocol"))),
+        endpoints=endpoints,
     )
 
 
@@ -176,11 +179,11 @@ def find_neptune(sysfs: str = "/sys", dev: str = "/dev", vid: str = NEPTUNE_VID,
             product=read_text(os.path.join(path, "product")), serial=read_text(os.path.join(path, "serial")),
         )
         prefix = entry + ":"
-        for sub in sorted(os.listdir(path)):
-            if sub.startswith(prefix):
-                itf = _parse_interface(os.path.join(path, sub))
-                if itf is not None:
-                    device.interfaces[itf.number] = itf
+        for child in sorted(os.listdir(path)):
+            if child.startswith(prefix):
+                interface = _parse_interface(os.path.join(path, child))
+                if interface is not None:
+                    device.interfaces[interface.number] = interface
         return device
     return None
 
@@ -192,33 +195,33 @@ class UsbhidBinder:
         self.sysfs = sysfs
         self.driver_dir = os.path.join(sysfs, "bus", "usb", "drivers", USBHID_DRIVER)
 
-    def bound_driver(self, itf_name: str) -> Optional[str]:
-        path = os.path.join(self.sysfs, "bus", "usb", "devices", itf_name, "driver")
+    def bound_driver(self, interface_name: str) -> Optional[str]:
+        path = os.path.join(self.sysfs, "bus", "usb", "devices", interface_name, "driver")
         try:
             return os.path.basename(os.readlink(path))
         except OSError:
             return None
 
-    def unbind(self, itf_name: str) -> bool:
-        """Detach ``itf_name`` from usbhid. Returns True if a write happened."""
-        if self.bound_driver(itf_name) != USBHID_DRIVER:
+    def unbind(self, interface_name: str) -> bool:
+        """Detach ``interface_name`` from usbhid. Returns True if a write happened."""
+        if self.bound_driver(interface_name) != USBHID_DRIVER:
             return False
         try:
-            write_text(os.path.join(self.driver_dir, "unbind"), itf_name)
-            log.info("unbound %s from usbhid", itf_name)
+            write_text(os.path.join(self.driver_dir, "unbind"), interface_name)
+            log.info("unbound %s from usbhid", interface_name)
             return True
         except OSError as exc:
             if exc.errno == 19:  # ENODEV: raced with somebody else — already unbound
                 return False
             raise
 
-    def bind(self, itf_name: str) -> bool:
-        """Attach ``itf_name`` to usbhid if it has no driver. Returns True if a write happened."""
-        if self.bound_driver(itf_name) is not None:
+    def bind(self, interface_name: str) -> bool:
+        """Attach ``interface_name`` to usbhid if it has no driver. Returns True if a write happened."""
+        if self.bound_driver(interface_name) is not None:
             return False
         try:
-            write_text(os.path.join(self.driver_dir, "bind"), itf_name)
-            log.info("bound %s to usbhid", itf_name)
+            write_text(os.path.join(self.driver_dir, "bind"), interface_name)
+            log.info("bound %s to usbhid", interface_name)
             return True
         except OSError as exc:
             if exc.errno in (16, 19):  # EBUSY already bound / ENODEV gone
@@ -226,8 +229,8 @@ class UsbhidBinder:
             # Fall back to letting the core pick a driver (drivers_probe).
             probe = os.path.join(self.sysfs, "bus", "usb", "drivers_probe")
             try:
-                write_text(probe, itf_name)
-                log.info("re-probed %s via drivers_probe (bind failed: %s)", itf_name, exc)
+                write_text(probe, interface_name)
+                log.info("re-probed %s via drivers_probe (bind failed: %s)", interface_name, exc)
                 return True
             except OSError:
                 raise exc
@@ -236,12 +239,12 @@ class UsbhidBinder:
 def capture_interfaces(device: NeptuneDevice, binder: UsbhidBinder) -> List[str]:
     """Unbind the capture interfaces from usbhid; returns the names that were detached by us."""
     detached: List[str] = []
-    for n in CAPTURE_INTERFACES:
-        itf = device.interface(n)
-        if itf is None:
+    for number in CAPTURE_INTERFACES:
+        interface = device.interface(number)
+        if interface is None:
             continue
-        if binder.unbind(itf.name):
-            detached.append(itf.name)
+        if binder.unbind(interface.name):
+            detached.append(interface.name)
     return detached
 
 
@@ -256,10 +259,10 @@ def release_interfaces(device: Optional[NeptuneDevice], binder: UsbhidBinder,
     if names is None:
         names = []
         if device is not None:
-            for n in CAPTURE_INTERFACES:
-                itf = device.interface(n)
-                if itf is not None:
-                    names.append(itf.name)
+            for number in CAPTURE_INTERFACES:
+                interface = device.interface(number)
+                if interface is not None:
+                    names.append(interface.name)
     rebound: List[str] = []
     for name in names:
         try:

@@ -106,9 +106,9 @@ class GadgetDescriptors:
     pid: int
     bcd_device: int = 0x0100
     bcd_usb: int = 0x0200
-    dev_class: int = 0
-    dev_subclass: int = 0
-    dev_protocol: int = 0
+    device_class: int = 0
+    device_subclass: int = 0
+    device_protocol: int = 0
     ep0_max_packet: int = 64
     manufacturer: str = "Decky Controller"
     product: str = "Steam Deck Gamepad"
@@ -127,19 +127,19 @@ class GadgetDescriptors:
     high_speed: bool = True
 
     def device_descriptor(self) -> bytes:
-        return struct.pack("<BBHBBBBHHHBBBB", 18, USB_DT_DEVICE, self.bcd_usb, self.dev_class,
-                           self.dev_subclass, self.dev_protocol, self.ep0_max_packet, self.vid, self.pid,
+        return struct.pack("<BBHBBBBHHHBBBB", 18, USB_DT_DEVICE, self.bcd_usb, self.device_class,
+                           self.device_subclass, self.device_protocol, self.ep0_max_packet, self.vid, self.pid,
                            self.bcd_device, 1, 2, 3, 1)
 
-    def config_descriptor(self, dtype: int = USB_DT_CONFIG) -> bytes:
+    def config_descriptor(self, descriptor_type: int = USB_DT_CONFIG) -> bytes:
         total = 9 + len(self.config_body)
-        header = struct.pack("<BBHBBBBB", 9, dtype, total, self.num_interfaces, 1, 0,
+        header = struct.pack("<BBHBBBBB", 9, descriptor_type, total, self.num_interfaces, 1, 0,
                              self.config_attributes, self.max_power_ma // 2)
         return header + self.config_body
 
     def qualifier_descriptor(self) -> bytes:
-        return struct.pack("<BBHBBBBBB", 10, USB_DT_DEVICE_QUALIFIER, self.bcd_usb, self.dev_class,
-                           self.dev_subclass, self.dev_protocol, self.ep0_max_packet, 1, 0)
+        return struct.pack("<BBHBBBBBB", 10, USB_DT_DEVICE_QUALIFIER, self.bcd_usb, self.device_class,
+                           self.device_subclass, self.device_protocol, self.ep0_max_packet, 1, 0)
 
     def string(self, index: int) -> Optional[bytes]:
         table = {1: self.manufacturer, 2: self.product, 3: self.serial}

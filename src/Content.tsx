@@ -100,8 +100,8 @@ interface RowInfo {
   description?: string;
 }
 
-function drdRow(s: Status): RowInfo {
-  return s.drd_enabled
+function drdRow(status: Status): RowInfo {
+  return status.drd_enabled
     ? { value: "Enabled", tone: "good" }
     : {
         value: "Disabled",
@@ -120,10 +120,10 @@ const PLUG_INTO_PC = "Plug the Deck into a PC with a USB-C data cable.";
  * while idle `udc_state` is always "not attached", so the row shows what the port physically sees
  * (`cable_kind`, see docs/ARCHITECTURE.md). Values stay <= 14 characters; no PD-contract/voltage wording.
  */
-function cableRow(s: Status): RowInfo & { label: string } {
-  if (!s.drd_enabled) return { label: "Cable", value: "N/A", tone: "off", description: "Requires DRD." };
-  if (GADGET_BOUND_STATES.has(s.session_state)) {
-    if (s.host_connected) {
+function cableRow(status: Status): RowInfo & { label: string } {
+  if (!status.drd_enabled) return { label: "Cable", value: "N/A", tone: "off", description: "Requires DRD." };
+  if (GADGET_BOUND_STATES.has(status.session_state)) {
+    if (status.host_connected) {
       return { label: "Host", value: "Connected", tone: "good", description: "The PC sees the controller." };
     }
     return {
@@ -133,7 +133,7 @@ function cableRow(s: Status): RowInfo & { label: string } {
       description: "Waiting for the PC to enumerate the controller.",
     };
   }
-  switch (s.cable_kind) {
+  switch (status.cable_kind) {
     case "none":
       return { label: "Cable", value: "Not connected", tone: "off", description: PLUG_INTO_PC };
     case "pc":
@@ -163,10 +163,10 @@ function cableRow(s: Status): RowInfo & { label: string } {
       break;
   }
   // Older backend without cable_kind: fall back to UDC/extcon only.
-  if (s.host_connected) {
+  if (status.host_connected) {
     return { label: "Cable", value: "PC", tone: "good", description: "Plugged into a PC. Ready to start." };
   }
-  if ((s.extcon?.["USB-HOST"] ?? 0) === 1) {
+  if ((status.extcon?.["USB-HOST"] ?? 0) === 1) {
     return {
       label: "Cable",
       value: "Dock",
@@ -177,24 +177,24 @@ function cableRow(s: Status): RowInfo & { label: string } {
   return { label: "Cable", value: "Not connected", tone: "off", description: PLUG_INTO_PC };
 }
 
-function controllerRow(s: Status): RowInfo {
-  if (!s.neptune_present) {
+function controllerRow(status: Status): RowInfo {
+  if (!status.neptune_present) {
     return { value: "Not found", tone: "bad", description: "Built-in controller (28de:1205) not detected." };
   }
-  return s.neptune_captured
+  return status.neptune_captured
     ? { value: "Captured", tone: "warn", description: "Input goes to the PC, not to Steam." }
     : { value: "Steam", tone: "good" };
 }
 
-function modeRow(s: Status): RowInfo {
-  const label = SESSION_STATE_LABELS[s.session_state] ?? s.session_state;
-  if (s.session_state === "ACTIVE") {
-    const profile = s.active_profile ? PROFILE_LABELS[s.active_profile] : "";
+function modeRow(status: Status): RowInfo {
+  const label = SESSION_STATE_LABELS[status.session_state] ?? status.session_state;
+  if (status.session_state === "ACTIVE") {
+    const profile = status.active_profile ? PROFILE_LABELS[status.active_profile] : "";
     // Backend sends hz rounded to 0.1 ("249.9"); show a whole number and keep the value <= 14 chars.
-    const hz = s.metrics?.hz ? ` · ${Math.round(s.metrics.hz)}Hz` : "";
-    return { value: `${label}${hz}`, tone: "good", description: `${profile}${s.transport ? ` via ${s.transport}` : ""}` };
+    const hz = status.metrics?.hz ? ` · ${Math.round(status.metrics.hz)}Hz` : "";
+    return { value: `${label}${hz}`, tone: "good", description: `${profile}${status.transport ? ` via ${status.transport}` : ""}` };
   }
-  if (s.session_state === "IDLE") return { value: label, tone: "off" };
+  if (status.session_state === "IDLE") return { value: label, tone: "off" };
   return { value: label, tone: "warn" };
 }
 
@@ -272,7 +272,7 @@ export const Content: FC = () => {
             rgOptions={PROFILE_OPTIONS}
             selectedOption={settings.profile}
             disabled={!settingsLoaded}
-            onChange={(o: SingleDropdownOption) => void updateSettings({ profile: o.data as Profile })}
+            onChange={(option: SingleDropdownOption) => void updateSettings({ profile: option.data as Profile })}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -282,7 +282,7 @@ export const Content: FC = () => {
             rgOptions={KILL_COMBO_OPTIONS}
             selectedOption={settings.kill_combo}
             disabled={!settingsLoaded}
-            onChange={(o: SingleDropdownOption) => void updateSettings({ kill_combo: o.data as KillCombo })}
+            onChange={(option: SingleDropdownOption) => void updateSettings({ kill_combo: option.data as KillCombo })}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -304,8 +304,8 @@ export const Content: FC = () => {
               rgOptions={PADDLE_OPTIONS}
               selectedOption={settings.paddles[paddle]}
               disabled={!settingsLoaded}
-              onChange={(o: SingleDropdownOption) =>
-                void updateSettings({ paddles: { [paddle]: o.data as PaddleAction } })
+              onChange={(option: SingleDropdownOption) =>
+                void updateSettings({ paddles: { [paddle]: option.data as PaddleAction } })
               }
             />
           </PanelSectionRow>
