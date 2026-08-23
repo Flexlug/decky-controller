@@ -1,0 +1,72 @@
+"""The diagnostics dump behind the panel's Diagnostics button."""
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from typing import Any, Optional
+
+from .daemon.launcher import DaemonPaths, PYTHON_BIN
+from .daemon.supervisor import DaemonSupervisor
+
+log = logging.getLogger("controller_backend.diagnostics")
+
+JsonDict = dict[str, Any]
+LOG_TAIL_LINES = 50
+
+
+def tail_file(path: str, count: int, max_bytes: int = 64 * 1024) -> list[str]:
+    """Last ``count`` lines, reading at most ``max_bytes`` from the end; an absent file is simply empty."""
+    try:
+        with open(path, "rb") as log_file:
+            log_file.seek(0, os.SEEK_END)
+            size = log_file.tell()
+            log_file.seek(max(0, size - max_bytes))
+            data = log_file.read()
+    except OSError as exc:
+        log.debug("cannot tail %s: %s", path, exc)
+        return []
+    lines = data.decode("utf-8", "replace").splitlines()
+    if size > max_bytes and lines:
+        lines = lines[1:]   # the first line is almost certainly partial
+    return lines[-count:]
+
+
+def build_diagnostics(*, status: JsonDict, plugin_version: str, decky_version: Optional[str], settings: JsonDict,
+                      settings_path: str, supervisor: DaemonSupervisor, session_last_kill: Optional[str],
+                      cli_status_raw: Optional[JsonDict], cli_status_error: Optional[str],
+                      last_recover: Optional[JsonDict], paths: DaemonPaths, plugin_dir: str, runtime_dir: str,
+                      log_dir: str) -> JsonDict:
+    return {
+        "ok": True,
+        "plugin_version": plugin_version,
+        "decky_version": decky_version,
+        "python": sys.version,
+        "python_bin": PYTHON_BIN,
+        "kernel": status.get("kernel"),
+        "model": status.get("model"),
+        "status": status,
+        "cli_status_raw": cli_status_raw,
+        "cli_status_error": cli_status_error,
+        "settings": settings,
+        "daemon": {
+            "running": supervisor.alive(),
+            "pid": supervisor.pid,
+            "args": list(supervisor.args),
+            "started_at": supervisor.started_at,
+            "exit_code": supervisor.exit_code,
+            "stop_requested": supervisor.stop_requested,
+            "last_kill": session_last_kill,
+        },
+        "last_recover": last_recover,
+        "daemon_log_tail": tail_file(paths.log_path, LOG_TAIL_LINES),
+        "daemon_output_tail": list(supervisor.output)[-LOG_TAIL_LINES:],
+        "paths": {
+            "plugin_dir": plugin_dir,
+            "py_modules_dir": paths.py_modules_dir,
+            "settings": settings_path,
+            "runtime_dir": runtime_dir,
+            "log_dir": log_dir,
+            "daemon_log": paths.log_path,
+        },
+    }
