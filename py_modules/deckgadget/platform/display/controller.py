@@ -61,30 +61,6 @@ class ScreenController:
             return [order["gamescope"], order["kscreen"], order["backlight"]]
         return [order[self.requested_method]]
 
-    def _set_off(self, off: bool) -> None:
-        if off != self._off:
-            self._off = off
-            if self.on_change:
-                try:
-                    self.on_change(off, self.method)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("screen on_change callback failed: %s", exc)
-
-    def _choose_and_sleep(self) -> Optional[ScreenMethod]:
-        for method in self.candidates():
-            try:
-                if not method.available():
-                    log.info("screen method %s not available", method.name)
-                    continue
-                if method.sleep():
-                    log.info("screen off via %s", method.name)
-                    return method
-                log.warning("screen method %s could not turn the screen off", method.name)
-            except Exception as exc:  # noqa: BLE001 - cosmetic feature, never fatal
-                log.warning("screen method %s failed: %s", method.name, exc)
-        log.warning("screen stays on: no working screen-off method (requested %s)", self.requested_method)
-        return None
-
     def activate(self) -> None:
         with self._lock:
             if self._active:
@@ -110,6 +86,54 @@ class ScreenController:
                     self._watcher = None
             else:
                 log.warning("touchscreen not found; touch wake disabled")
+
+    def deactivate(self) -> None:
+        with self._lock:
+            was_active = self._active
+            self._active = False
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            watcher, self._watcher = self._watcher, None
+            method = self._method
+        if watcher is not None:
+            watcher.stop()
+        try:
+            if method is not None:
+                if not method.release():
+                    log.warning("screen release via %s reported failure", method.name)
+            elif was_active or self._off or self.backlight.saved_value() is not None:
+                # Nothing was in charge, or a crashed backlight session left a state file: restore only what we saved.
+                self.backlight.restore(forget=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("cannot restore the screen: %s", exc)
+        self._set_off(False)
+        with self._lock:
+            self._method = None
+
+    def _set_off(self, off: bool) -> None:
+        if off != self._off:
+            self._off = off
+            if self.on_change:
+                try:
+                    self.on_change(off, self.method)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("screen on_change callback failed: %s", exc)
+
+    def _choose_and_sleep(self) -> Optional[ScreenMethod]:
+        for method in self.candidates():
+            try:
+                if not method.available():
+                    log.info("screen method %s not available", method.name)
+                    continue
+                if method.sleep():
+                    log.info("screen off via %s", method.name)
+                    return method
+                log.warning("screen method %s could not turn the screen off", method.name)
+            except Exception as exc:  # noqa: BLE001 - cosmetic feature, never fatal
+                log.warning("screen method %s failed: %s", method.name, exc)
+        log.warning("screen stays on: no working screen-off method (requested %s)", self.requested_method)
+        return None
 
     def _on_touch(self) -> None:
         with self._lock:
@@ -141,27 +165,3 @@ class ScreenController:
                     log.warning("cannot turn the screen off again (%s)", self._method.name)
             except Exception as exc:  # noqa: BLE001
                 log.warning("cannot turn the screen off again: %s", exc)
-
-    def deactivate(self) -> None:
-        with self._lock:
-            was_active = self._active
-            self._active = False
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
-            watcher, self._watcher = self._watcher, None
-            method = self._method
-        if watcher is not None:
-            watcher.stop()
-        try:
-            if method is not None:
-                if not method.release():
-                    log.warning("screen release via %s reported failure", method.name)
-            elif was_active or self._off or self.backlight.saved_value() is not None:
-                # Nothing was in charge, or a crashed backlight session left a state file: restore only what we saved.
-                self.backlight.restore(forget=True)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("cannot restore the screen: %s", exc)
-        self._set_off(False)
-        with self._lock:
-            self._method = None

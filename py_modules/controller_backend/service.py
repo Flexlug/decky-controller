@@ -123,6 +123,35 @@ class Service:
         await self._emit("status", status)
         return status
 
+    async def build_status(self, force: bool = False) -> JsonDict:
+        cli_status, cli_error = await self._cli_status(force)
+        return build_status(
+            plugin_version=self.plugin_version,
+            facts=hardware_facts(self.sysfs_root, self.dev_root),
+            cli_status=normalize_cli_status(cli_status) if cli_status else None,
+            cli_error=cli_error,
+            session=self.session,
+            running=self.supervisor.alive(),
+            daemon_pid=self.supervisor.pid,
+            settings=self.settings.load(),
+        )
+
+    async def emit_status(self, force: bool = False) -> None:
+        try:
+            await self._emit("status", await self.build_status(force))
+        except Exception:
+            self.log.exception("emit status failed")
+
+    async def diagnostics(self) -> JsonDict:
+        return build_diagnostics(
+            status=await self.build_status(force=True),
+            plugin_version=self.plugin_version, decky_version=self.decky_version,
+            settings=self.settings.load(), settings_path=self.settings.path,
+            supervisor=self.supervisor, session_last_kill=self.session.last_kill,
+            cli_status_raw=self.cli_cache, cli_status_error=self.cli_error, last_recover=self.last_recover,
+            paths=self.paths, plugin_dir=self.plugin_dir, runtime_dir=self.runtime_dir, log_dir=self.log_dir,
+        )
+
     # --- daemon callbacks -----------------------------------------------------------------------
 
     async def _on_daemon_event(self, event: JsonDict) -> None:
@@ -173,25 +202,6 @@ class Service:
             self.cli_cache, self.cli_error = data, error
             return data, error
 
-    async def build_status(self, force: bool = False) -> JsonDict:
-        cli_status, cli_error = await self._cli_status(force)
-        return build_status(
-            plugin_version=self.plugin_version,
-            facts=hardware_facts(self.sysfs_root, self.dev_root),
-            cli_status=normalize_cli_status(cli_status) if cli_status else None,
-            cli_error=cli_error,
-            session=self.session,
-            running=self.supervisor.alive(),
-            daemon_pid=self.supervisor.pid,
-            settings=self.settings.load(),
-        )
-
-    async def emit_status(self, force: bool = False) -> None:
-        try:
-            await self._emit("status", await self.build_status(force))
-        except Exception:
-            self.log.exception("emit status failed")
-
     async def _status_loop(self) -> None:
         """Every 2 s while the daemon runs; while idle, poll sysfs every 5 s and emit only on a change."""
         last_signature: Optional[tuple] = None
@@ -211,16 +221,6 @@ class Service:
             except Exception:
                 self.log.exception("status loop iteration failed")
                 await asyncio.sleep(STATUS_PERIOD_IDLE_S)
-
-    async def diagnostics(self) -> JsonDict:
-        return build_diagnostics(
-            status=await self.build_status(force=True),
-            plugin_version=self.plugin_version, decky_version=self.decky_version,
-            settings=self.settings.load(), settings_path=self.settings.path,
-            supervisor=self.supervisor, session_last_kill=self.session.last_kill,
-            cli_status_raw=self.cli_cache, cli_status_error=self.cli_error, last_recover=self.last_recover,
-            paths=self.paths, plugin_dir=self.plugin_dir, runtime_dir=self.runtime_dir, log_dir=self.log_dir,
-        )
 
     # --- events to the frontend -----------------------------------------------------------------
 

@@ -57,14 +57,6 @@ class RawGadgetDevice:
         event_type, length = struct.unpack_from("<II", buffer.raw, 0)
         return event_type, buffer.raw[SZ_EVENT:SZ_EVENT + length]
 
-    def _ep_io(self, request: int, endpoint: int, data: bytes, read_length: Optional[int] = None) -> Tuple[int, bytes]:
-        payload = data if read_length is None else b"\0" * read_length
-        length = len(data) if read_length is None else read_length
-        buffer = ctypes.create_string_buffer(struct.pack("<HHI", endpoint, 0, length) + payload,
-                                             SZ_EP_IO + len(payload))
-        transferred = ioctl(self.fd, request, buffer)
-        return transferred, buffer.raw[SZ_EP_IO:SZ_EP_IO + max(transferred, 0)]
-
     def ep0_write(self, data: bytes) -> int:
         return self._ep_io(USB_RAW_IOCTL_EP0_WRITE, 0, data)[0]
 
@@ -105,3 +97,11 @@ class RawGadgetDevice:
             name, address, capabilities, max_packet = struct.unpack_from("<16sIIH", buffer.raw, index * SZ_EP_INFO)
             endpoints.append((name.split(b"\0")[0].decode(errors="replace"), address, capabilities, max_packet))
         return endpoints
+
+    def _ep_io(self, request: int, endpoint: int, data: bytes, read_length: Optional[int] = None) -> Tuple[int, bytes]:
+        payload = data if read_length is None else b"\0" * read_length
+        length = len(data) if read_length is None else read_length
+        buffer = ctypes.create_string_buffer(struct.pack("<HHI", endpoint, 0, length) + payload,
+                                             SZ_EP_IO + len(payload))
+        transferred = ioctl(self.fd, request, buffer)
+        return transferred, buffer.raw[SZ_EP_IO:SZ_EP_IO + max(transferred, 0)]

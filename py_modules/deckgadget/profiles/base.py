@@ -53,10 +53,6 @@ class SetupPacket:
     wIndex: int
     wLength: int
 
-    @classmethod
-    def unpack(cls, raw: bytes) -> "SetupPacket":
-        return cls(*struct.unpack("<BBHHH", bytes(raw[:8])))
-
     @property
     def dir_in(self) -> bool:
         return bool(self.bmRequestType & USB_DIR_IN)
@@ -68,6 +64,10 @@ class SetupPacket:
     @property
     def recipient(self) -> int:
         return self.bmRequestType & USB_RECIP_MASK
+
+    @classmethod
+    def unpack(cls, raw: bytes) -> "SetupPacket":
+        return cls(*struct.unpack("<BBHHH", bytes(raw[:8])))
 
     def describe(self) -> str:
         return (f"bmRT=0x{self.bmRequestType:02x} bReq=0x{self.bRequest:02x} wValue=0x{self.wValue:04x} "
@@ -116,6 +116,18 @@ class GadgetDescriptors:
     ep_out: Optional[bytes] = None
     high_speed: bool = True
 
+    @property
+    def ep_in_address(self) -> int:
+        return self.ep_in[2]
+
+    @property
+    def ep_in_max_packet(self) -> int:
+        return struct.unpack_from("<H", self.ep_in, 4)[0]
+
+    @property
+    def ep_out_max_packet(self) -> int:
+        return struct.unpack_from("<H", self.ep_out, 4)[0] if self.ep_out else 0
+
     def device_descriptor(self) -> bytes:
         return struct.pack("<BBHBBBBHHHBBBB", 18, USB_DT_DEVICE, self.bcd_usb, self.device_class,
                            self.device_subclass, self.device_protocol, self.ep0_max_packet, self.vid, self.pid,
@@ -135,18 +147,6 @@ class GadgetDescriptors:
         table = {1: self.manufacturer, 2: self.product, 3: self.serial}
         table.update(self.extra_strings)
         return string_descriptor(table.get(index), index)
-
-    @property
-    def ep_in_address(self) -> int:
-        return self.ep_in[2]
-
-    @property
-    def ep_in_max_packet(self) -> int:
-        return struct.unpack_from("<H", self.ep_in, 4)[0]
-
-    @property
-    def ep_out_max_packet(self) -> int:
-        return struct.unpack_from("<H", self.ep_out, 4)[0] if self.ep_out else 0
 
 
 @dataclass

@@ -49,12 +49,6 @@ class Backlight:
             log.warning("ignoring corrupt backlight state file %s: %r", self.state_file, text)
             return None
 
-    def _safe_value(self, saved: Optional[int]) -> int:
-        # Never "restore" to 0 — that would leave the Deck dark.
-        if saved is None or saved <= 0:
-            return max(1, self.max_brightness() // 2)
-        return saved
-
     def save_and_off(self) -> bool:
         """Save the current brightness and switch the backlight off; ``False`` when there is no
         backlight device (the caller must not report the screen as off then)."""
@@ -96,6 +90,12 @@ class Backlight:
                 log.debug("cannot remove %s: %s", self.state_file, exc)
         log.info("backlight restored to %d", value)
         return value
+
+    def _safe_value(self, saved: Optional[int]) -> int:
+        # Never "restore" to 0 — that would leave the Deck dark.
+        if saved is None or saved <= 0:
+            return max(1, self.max_brightness() // 2)
+        return saved
 
 
 class BacklightDim(ScreenMethod):

@@ -28,6 +28,7 @@ COMMAND_TIMEOUT_S = 3.0
 
 class CommandResult(NamedTuple):
     """Outcome of :func:`run_command`; ``returncode`` is ``None`` when the command never finished."""
+
     returncode: Optional[int]
     stdout: str
     stderr: str
@@ -140,6 +141,11 @@ class GamescopeSleep(ScreenMethod):
         self.runtime_dir: Optional[str] = None
         self.display: Optional[str] = None
 
+    @property
+    def socket_path(self) -> Optional[str]:
+        runtime_dir, display = self.runtime_dir, self.display
+        return os.path.join(runtime_dir, display) if runtime_dir and display else None
+
     def discover(self) -> Optional[str]:
         """Locate the socket; returns its path (and caches ``runtime_dir``/``display``)."""
         if self._runtime_dir and self._display:
@@ -153,11 +159,6 @@ class GamescopeSleep(ScreenMethod):
         self.runtime_dir, self.display = found
         return os.path.join(*found)
 
-    @property
-    def socket_path(self) -> Optional[str]:
-        runtime_dir, display = self.runtime_dir, self.display
-        return os.path.join(runtime_dir, display) if runtime_dir and display else None
-
     def binary(self) -> Optional[str]:
         return self._binary if self._binary else _resolve_binary(GAMESCOPECTL)
 
@@ -170,6 +171,15 @@ class GamescopeSleep(ScreenMethod):
             "XDG_RUNTIME_DIR": self.runtime_dir or DECK_RUNTIME_DIR,
             "GAMESCOPE_WAYLAND_DISPLAY": self.display or "gamescope-0",
         }
+
+    def sleep(self) -> bool:
+        return self._set(True)
+
+    def wake(self) -> bool:
+        return self._set(False)
+
+    def info(self) -> Dict[str, object]:
+        return {"available": self.available(), "socket": self.socket_path, "binary": self.binary()}
 
     def _set(self, asleep: bool) -> bool:
         what = "sleep" if asleep else "wake"
@@ -196,15 +206,6 @@ class GamescopeSleep(ScreenMethod):
             return True
         log.warning("gamescope %s failed (rc=%s): %s", what, result.returncode, output or "no output")
         return False
-
-    def sleep(self) -> bool:
-        return self._set(True)
-
-    def wake(self) -> bool:
-        return self._set(False)
-
-    def info(self) -> Dict[str, object]:
-        return {"available": self.available(), "socket": self.socket_path, "binary": self.binary()}
 
 
 class KscreenDpms(ScreenMethod):
@@ -242,6 +243,15 @@ class KscreenDpms(ScreenMethod):
             "QT_QPA_PLATFORM": "wayland",
         }
 
+    def sleep(self) -> bool:
+        return self._set(True)
+
+    def wake(self) -> bool:
+        return self._set(False)
+
+    def info(self) -> Dict[str, object]:
+        return {"available": self.available(), "socket": self.socket_path, "binary": self.binary()}
+
     def _set(self, asleep: bool) -> bool:
         what = "sleep" if asleep else "wake"
         try:
@@ -262,12 +272,3 @@ class KscreenDpms(ScreenMethod):
             return True
         log.warning("kscreen %s failed (rc=%s): %s", what, result.returncode, result.tail() or "no output")
         return False
-
-    def sleep(self) -> bool:
-        return self._set(True)
-
-    def wake(self) -> bool:
-        return self._set(False)
-
-    def info(self) -> Dict[str, object]:
-        return {"available": self.available(), "socket": self.socket_path, "binary": self.binary()}

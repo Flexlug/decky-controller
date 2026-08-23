@@ -148,18 +148,6 @@ class NeptuneUsbSource:
         self.get_feature()
         self.heartbeats += 1
 
-    def _heartbeat_loop(self) -> None:
-        while not self._heartbeat_stop.wait(self.heartbeat_s):
-            try:
-                self.heartbeat()
-            except OSError as exc:
-                self.heartbeat_errors += 1
-                if self.heartbeat_errors <= 3 or self.heartbeat_errors % 30 == 0:
-                    log.warning("heartbeat failed (%d): %s", self.heartbeat_errors, exc)
-            except NeptuneError as exc:
-                log.debug("heartbeat stops: %s", exc)
-                break
-
     def rumble(self, left: int, right: int) -> None:
         try:
             self.send_feature(cmd_rumble(left, right), timeout_ms=200)
@@ -185,3 +173,15 @@ class NeptuneUsbSource:
         if usb_device is None:
             raise NeptuneError("device not open")
         return usb_device.interrupt_in(self.ep_in, max(1, int(timeout * 1000)))
+
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(self.heartbeat_s):
+            try:
+                self.heartbeat()
+            except OSError as exc:
+                self.heartbeat_errors += 1
+                if self.heartbeat_errors <= 3 or self.heartbeat_errors % 30 == 0:
+                    log.warning("heartbeat failed (%d): %s", self.heartbeat_errors, exc)
+            except NeptuneError as exc:
+                log.debug("heartbeat stops: %s", exc)
+                break

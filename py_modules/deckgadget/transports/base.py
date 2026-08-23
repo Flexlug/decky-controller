@@ -116,6 +116,10 @@ def join_with_interrupts(threads, timeout: float, interval: float = 0.05) -> boo
 class Transport(Protocol):
     name: str
 
+    @property
+    def error(self) -> Optional[BaseException]:
+        """Fatal background error, if any (session turns it into kill reason=error)."""
+
     def start(self, profile: Profile, on_feedback: Optional[FeedbackCallback] = None) -> None:
         """Bring the gadget up (non-blocking w.r.t. host enumeration)."""
 
@@ -126,10 +130,6 @@ class Transport(Protocol):
         """True while the host has configured us (reports are flowing)."""
 
     def metrics(self) -> TransportMetrics: ...
-
-    @property
-    def error(self) -> Optional[BaseException]:
-        """Fatal background error, if any (session turns it into kill reason=error)."""
 
     def stop(self) -> None:
         """Tear the gadget down (idempotent, must not hang)."""

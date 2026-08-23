@@ -136,6 +136,16 @@ Release: bump `version` in `package.json`, commit, `git tag v<version>`, push th
   pull one field" helpers whose call site is as long as the body; read sysfs through
   `deckhw.sysfs.Sysfs(root).text("class", "udc", name, "state")` instead of `read_text(os.path.join(…))`
   chains. Long orchestration (`recover()`, `cmd_probe`, EP0 handling) is split into named steps.
+* **Class layout, always in this order:** class‑level constants/fields → `__init__` and other dunders →
+  `@property` → public methods → private (`_`) methods. `@classmethod`/`@staticmethod` sort with the
+  visibility of their name. Per‑run mutable state of a long‑lived object goes into its own dataclass
+  (`DaemonRun`) rather than a dozen constructor fields reset by hand.
+* **String literals:** a key/name used more than once, or one that is part of a contract (JSON keys, CLI
+  flags, event names, sysfs attribute names read in several places), lives in one constant; a literal used
+  exactly once stays inline — no constants for their own sake.
+* **Imports are absolute** (`from deckgadget.util.fs import …`, `from deckhw.sysfs import Sysfs`,
+  `from controller_backend.settings import …`); `py_modules` is on `sys.path` for the daemon, the backend and
+  the tests. Group: stdlib → first‑party (one sorted block).
 * **Never swallow an error silently.** Every `except` either re‑raises, records into a report/result that
   the caller logs, or logs itself: `ERROR` when giving up (session/rollback failed, daemon won't start),
   `WARNING` when continuing degraded (fallback taken, best‑effort cleanup failed, corrupt file → defaults),

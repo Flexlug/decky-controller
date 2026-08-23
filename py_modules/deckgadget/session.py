@@ -66,9 +66,11 @@ class HoldDetector:
 class ScreenLike:
     """Minimal interface the session needs from ``platform.display.controller.ScreenController``."""
 
-    def activate(self) -> None: ...
-    def deactivate(self) -> None: ...
     is_off: bool = False
+
+    def activate(self) -> None: ...
+
+    def deactivate(self) -> None: ...
 
 
 class Session:
@@ -102,16 +104,16 @@ class Session:
         self._lock = threading.Lock()
         self.last_feedback: Optional[Feedback] = None
 
+    @property
+    def stopping(self) -> bool:
+        return self._stop.is_set()
+
     def request_stop(self, reason: str = KILL_SIGNAL) -> None:
         """Thread/signal-safe; the first reason wins."""
         with self._lock:
             if self.kill_reason is None:
                 self.kill_reason = reason
         self._stop.set()
-
-    @property
-    def stopping(self) -> bool:
-        return self._stop.is_set()
 
     def run(self) -> int:
         """Run to completion; returns the process exit code (0 = clean, 1 = error)."""

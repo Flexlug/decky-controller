@@ -66,15 +66,15 @@ class NeptuneDevice:
     product: Optional[str] = None
     serial: Optional[str] = None
 
-    def interface(self, number: int) -> Optional[Interface]:
-        return self.interfaces.get(number)
-
     @property
     def captured(self) -> bool:
         """True when any capture interface is not bound to usbhid (someone detached it)."""
         return any(interface.driver != USBHID_DRIVER
                    for number in CAPTURE_INTERFACES
                    if (interface := self.interfaces.get(number)) is not None)
+
+    def interface(self, number: int) -> Optional[Interface]:
+        return self.interfaces.get(number)
 
     def as_dict(self) -> dict:
         return {
