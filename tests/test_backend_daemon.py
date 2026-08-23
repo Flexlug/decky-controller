@@ -54,8 +54,8 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(launcher.daemon_command("status", "--no-modprobe"),
                          ["/usr/bin/python3", "-m", "deckgadget", "status", "--no-modprobe"])
 
-    def test_paths_under_plugin_dirs(self):
-        paths = launcher.DaemonPaths.under("/plugin", "/logs", "/run")
+    def test_paths_for_plugin_dirs(self):
+        paths = launcher.DaemonPaths.for_plugin("/plugin", "/logs", "/run")
         self.assertEqual((paths.py_modules_dir, paths.log_path, paths.pidfile),
                          ("/plugin/py_modules", "/logs/deckgadget.log", "/run/deckgadget.pid"))
 
@@ -88,19 +88,13 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(settings.PADDLES, daemon_config.PADDLE_NAMES)
 
 
-class EventParsingTest(unittest.TestCase):
-    def test_event_line(self):
-        self.assertEqual(events.parse_event_line('{"ev": "state", "state": "ACTIVE"}'), {"ev": "state", "state": "ACTIVE"})
-        self.assertIsNone(events.parse_event_line("plain log line"))
-        self.assertIsNone(events.parse_event_line("[1, 2]"))
-
-    def test_parse_json_object_tolerates_log_noise(self):
-        self.assertEqual(events.parse_json_object('{"ok": true}'), {"ok": True})
-        self.assertEqual(events.parse_json_object('INFO starting\nWARN x\n{"ok": false, "n": 2}\n'),
-                         {"ok": False, "n": 2})
-        self.assertIsNone(events.parse_json_object(""))
-        self.assertIsNone(events.parse_json_object("[1, 2]"))
-        self.assertIsNone(events.parse_json_object("just text"))
+class JsonObjectParsingTest(unittest.TestCase):
+    def test_object_or_none_with_a_warning(self):
+        self.assertEqual(events.parse_json_object('{"ok": true}', "cmd"), {"ok": True})
+        with self.assertLogs("controller_backend.daemon.events", level="WARNING") as logs:
+            self.assertIsNone(events.parse_json_object("[1, 2]", "cmd"))
+            self.assertIsNone(events.parse_json_object("just text", "cmd"))
+        self.assertEqual(len(logs.output), 2)
 
 
 class NormalizeCliStatusTest(unittest.TestCase):
@@ -113,21 +107,14 @@ class NormalizeCliStatusTest(unittest.TestCase):
                           "host_connected": True, "neptune_present": True, "neptune_captured": False,
                           "cable_kind": "pc", "pd_contract_mv": 5000, "kernel": "6.16"})
 
-    def test_nested_and_short_spellings(self):
-        raw = {"drd": {"enabled": True}, "udc": {"name": "dwc3.1.auto", "state": "not attached"},
-               "neptune": {"present": 1, "captured": 1}, "connected": 0, "extcon": {"USB": 1, "USB-HOST": 0}}
-        self.assertEqual(commands.normalize_cli_status(raw),
-                         {"drd_enabled": True, "udc_name": "dwc3.1.auto", "udc_state": "not attached",
-                          "neptune_present": True, "neptune_captured": True, "host_connected": False,
-                          "extcon": {"USB": 1, "USB-HOST": 0}})
-
     def test_nulls_and_malformed_extcon_are_skipped(self):
-        self.assertEqual(commands.normalize_cli_status({"cable_power": None, "extcon": "garbage", "udc_name": None}), {})
+        with self.assertLogs("controller_backend.daemon.commands", level="WARNING"):
+            self.assertEqual(commands.normalize_cli_status({"cable_power": None, "extcon": "garbage", "udc_name": None}), {})
 
 
 class OneShotCommandsTest(unittest.TestCase):
     def test_status_returns_json_or_an_error(self):
-        runner = FakeCliRunner({"status": (0, 'INFO x\n{"ok": true, "drd_enabled": true}', "")})
+        runner = FakeCliRunner({"status": (0, '{"ok": true, "drd_enabled": true}\n', "")})
         self.assertEqual(asyncio.run(commands.run_status(runner)), ({"ok": True, "drd_enabled": True}, None))
         self.assertEqual(runner.calls[0][0], "status")
         runner = FakeCliRunner({"status": (1, "Traceback…", "boom\n")})

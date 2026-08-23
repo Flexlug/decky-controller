@@ -37,6 +37,7 @@ def build_diagnostics(*, status: JsonDict, plugin_version: str, decky_version: O
                       cli_status_raw: Optional[JsonDict], cli_status_error: Optional[str],
                       last_recover: Optional[JsonDict], paths: DaemonPaths, plugin_dir: str, runtime_dir: str,
                       log_dir: str) -> JsonDict:
+    run = supervisor.run
     return {
         "ok": True,
         "plugin_version": plugin_version,
@@ -52,15 +53,15 @@ def build_diagnostics(*, status: JsonDict, plugin_version: str, decky_version: O
         "daemon": {
             "running": supervisor.alive(),
             "pid": supervisor.pid,
-            "args": list(supervisor.args),
-            "started_at": supervisor.started_at,
-            "exit_code": supervisor.exit_code,
-            "stop_requested": supervisor.stop_requested,
+            "args": list(run.args) if run else [],
+            "started_at": run.started_at if run else None,
+            "exit_code": run.exit_code if run else None,
+            "stop_requested": bool(run and run.stop_requested),
             "last_kill": session_last_kill,
         },
         "last_recover": last_recover,
         "daemon_log_tail": tail_file(paths.log_path, LOG_TAIL_LINES),
-        "daemon_output_tail": list(supervisor.output)[-LOG_TAIL_LINES:],
+        "daemon_output_tail": list(run.output)[-LOG_TAIL_LINES:] if run else [],
         "paths": {
             "plugin_dir": plugin_dir,
             "py_modules_dir": paths.py_modules_dir,

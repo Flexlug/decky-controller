@@ -250,7 +250,7 @@ class StatusShapeTest(BackendHarness):
     def test_daemon_status_json_carries_every_key_the_backend_reads(self):
         fs = FakeSysfs(os.path.join(self.root, "daemon-sys"))
         daemon_status = collect_status(fs.sys, fs.dev, use_modprobe=False)
-        self.assertLessEqual(set(commands.CLI_KEY_ALIASES), set(daemon_status))
+        self.assertLessEqual(set(commands.STATUS_KEYS_FROM_CLI), set(daemon_status))
         normalized = commands.normalize_cli_status(daemon_status)
         self.assertLessEqual(set(normalized), set(ts_interface_fields("Status")))
 

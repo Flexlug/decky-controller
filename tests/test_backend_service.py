@@ -10,6 +10,7 @@ from unittest import mock
 
 import _path  # noqa: F401
 
+from controller_backend.daemon.supervisor import DaemonRun
 from controller_backend.service import Service
 from controller_backend.settings import DEFAULT_SETTINGS
 from test_backend_daemon import FakeCliRunner
@@ -40,7 +41,8 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
         return [payload for event, payload in self.emitted if event == name]
 
     def fake_process(self, pid=4242, returncode=None):
-        self.service.supervisor.process = types.SimpleNamespace(pid=pid, returncode=returncode)
+        self.service.supervisor.run = DaemonRun(process=types.SimpleNamespace(pid=pid, returncode=returncode),
+                                                args=[], started_at=0.0)
 
 
 class EventMappingTest(ServiceTestCase):
@@ -57,7 +59,7 @@ class EventMappingTest(ServiceTestCase):
         self.fake_process()
         await self.service._on_daemon_event({"ev": "state", "state": "STOPPED"})
         self.assertEqual(self.events("status")[-1]["session_state"], "STOPPING")
-        self.service.supervisor.process = None
+        self.service.supervisor.run.process.returncode = 0
         self.assertEqual((await self.service.build_status())["session_state"], "IDLE")
 
     async def test_error_event_reaches_the_status(self):
@@ -71,7 +73,8 @@ class EventMappingTest(ServiceTestCase):
 
     async def test_kill_toasts_and_signal_respects_stop_requested(self):
         await self.service._on_daemon_event({"ev": "kill", "reason": "combo"})
-        self.service.supervisor.stop_requested = True
+        self.fake_process()
+        self.service.supervisor.run.stop_requested = True
         await self.service._on_daemon_event({"ev": "kill", "reason": "signal"})
         toasts = self.events("toast")
         self.assertEqual(len(toasts), 1)
@@ -157,7 +160,7 @@ class StartTest(ServiceTestCase):
         async def fake_spawn(args):
             spawned.append(args)
             self.fake_process(pid=77)
-            self.service.supervisor.first_event.set()
+            self.service.supervisor.run.first_event.set()
 
         with mock.patch.object(self.service.supervisor, "spawn", fake_spawn):
             status = await self.service.start(None)

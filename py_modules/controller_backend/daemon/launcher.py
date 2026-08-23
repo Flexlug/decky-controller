@@ -10,7 +10,9 @@ from ..settings import PADDLES
 
 log = logging.getLogger("controller_backend.daemon.launcher")
 
-PYTHON_BIN = "/usr/bin/python3"          # the system interpreter, not Decky's bundled one
+# Decky Loader is a PyInstaller bundle: its sys.executable is the loader binary, not an interpreter, so the
+# daemon runs on SteamOS's own python3 (stdlib + ctypes are all it needs).
+PYTHON_BIN = "/usr/bin/python3"
 DAEMON_MODULE = "deckgadget"
 SUBPROCESS_LINE_LIMIT = 1 << 20
 DAEMON_LOG_NAME = "deckgadget.log"
@@ -24,7 +26,7 @@ class DaemonPaths:
     pidfile: str
 
     @classmethod
-    def under(cls, plugin_dir: str, log_dir: str, runtime_dir: str) -> "DaemonPaths":
+    def for_plugin(cls, plugin_dir: str, log_dir: str, runtime_dir: str) -> "DaemonPaths":
         return cls(py_modules_dir=os.path.join(plugin_dir, "py_modules"),
                    log_path=os.path.join(log_dir, DAEMON_LOG_NAME),
                    pidfile=os.path.join(runtime_dir, PIDFILE_NAME))

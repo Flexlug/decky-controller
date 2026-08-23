@@ -47,57 +47,24 @@ class CliRunner:
         return process.returncode, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
 
 
-# Status keys ← ``deckgadget status`` keys; shorter spellings are tolerated so a slightly different core
-# build still renders a useful status.
-CLI_KEY_ALIASES: dict[str, tuple[str, ...]] = {
-    "udc_speed": ("udc_speed",),
-    "kernel": ("kernel",),
-    "model": ("model",),
-    "drd_enabled": ("drd_enabled", "drd"),
-    "udc_name": ("udc_name", "udc"),
-    "udc_state": ("udc_state",),
-    "extcon": ("extcon",),
-    "host_connected": ("host_connected", "connected"),
-    "neptune_present": ("neptune_present", "neptune"),
-    "neptune_captured": ("neptune_captured", "captured"),
-    "cable_power": ("cable_power",),
-    "pd_contract_mv": ("pd_contract_mv",),
-    "pd_contract_ma": ("pd_contract_ma",),
-    "cable_kind": ("cable_kind",),
-}
+STATUS_KEYS_FROM_CLI = ("kernel", "model", "drd_enabled", "udc_name", "udc_state", "udc_speed", "extcon",
+                        "host_connected", "neptune_present", "neptune_captured", "cable_power",
+                        "pd_contract_mv", "pd_contract_ma", "cable_kind")
 BOOL_STATUS_KEYS = frozenset({"drd_enabled", "host_connected", "neptune_present", "neptune_captured", "cable_power"})
 
 
 def normalize_cli_status(raw: JsonDict) -> JsonDict:
-    """Pick the Status fields out of the ``deckgadget status`` JSON (unknown keys are ignored)."""
+    """The Status fields out of the ``deckgadget status`` JSON: known keys only, booleans coerced, nulls dropped."""
     result: JsonDict = {}
-    for key, aliases in CLI_KEY_ALIASES.items():
-        for alias in aliases:
-            if alias not in raw or raw[alias] is None:
-                continue
-            value = raw[alias]
-            if isinstance(value, dict):
-                # nested spellings: {"udc": {"name", "state"}}, {"neptune": {"present", "captured"}}, {"drd": {"enabled"}}
-                if key == "udc_name":
-                    result["udc_name"] = value.get("name")
-                    result["udc_state"] = value.get("state")
-                elif key == "neptune_present":
-                    result["neptune_present"] = bool(value.get("present"))
-                    if "captured" in value:
-                        result["neptune_captured"] = bool(value.get("captured"))
-                elif key == "drd_enabled":
-                    result["drd_enabled"] = bool(value.get("enabled"))
-                elif key == "extcon":
-                    result["extcon"] = {str(role): flag for role, flag in value.items()}
-            elif key in BOOL_STATUS_KEYS:
-                result[key] = bool(value)
-            elif key == "extcon":
-                log.debug("deckgadget status: extcon is not an object (%r) — ignored", value)
-                continue
-            else:
-                result[key] = value
-            break
-    return {key: value for key, value in result.items() if value is not None}
+    for key in STATUS_KEYS_FROM_CLI:
+        value = raw.get(key)
+        if value is None:
+            continue
+        if key == "extcon" and not isinstance(value, dict):
+            log.warning("deckgadget status: extcon is %r, expected an object — ignored", value)
+            continue
+        result[key] = bool(value) if key in BOOL_STATUS_KEYS else value
+    return result
 
 
 async def run_status(runner: CliRunner) -> tuple[Optional[JsonDict], Optional[str]]:
@@ -106,7 +73,7 @@ async def run_status(runner: CliRunner) -> tuple[Optional[JsonDict], Optional[st
         exit_code, stdout, stderr = await runner.run("status", timeout=STATUS_TIMEOUT_S)
     except (OSError, TimeoutError, ValueError) as exc:
         return None, f"deckgadget status failed: {type(exc).__name__}: {exc}"
-    data = parse_json_object(stdout)
+    data = parse_json_object(stdout, "deckgadget status")
     if data is not None:
         return data, None
     error = f"deckgadget status (rc={exit_code}) printed no JSON object"
@@ -139,7 +106,7 @@ async def run_recover(runner: CliRunner, reason: str) -> RecoverReport:
         exit_code, stdout, stderr = await runner.run("recover", timeout=RECOVER_TIMEOUT_S)
     except (OSError, TimeoutError, ValueError) as exc:
         exit_code, stdout, stderr = None, "", f"{type(exc).__name__}: {exc}"
-    report = parse_json_object(stdout)
+    report = parse_json_object(stdout, "deckgadget recover") if stdout.strip() else None
     errors = [str(item) for item in (report.get("errors") or [])] if report is not None else []
     ok = exit_code == 0 and report is not None and bool(report.get("ok")) and not errors
     if ok:

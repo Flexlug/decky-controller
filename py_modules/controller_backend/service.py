@@ -43,7 +43,7 @@ class Service:
         self.sysfs_root = sysfs_root
         self.dev_root = dev_root
 
-        self.paths = DaemonPaths.under(plugin_dir, log_dir, runtime_dir)
+        self.paths = DaemonPaths.for_plugin(plugin_dir, log_dir, runtime_dir)
         self.settings = SettingsStore(os.path.join(settings_dir, "settings.json"))
         self.session = SessionView()
         self.supervisor = DaemonSupervisor(self.paths, on_event=self._on_daemon_event, on_exit=self._on_daemon_exit)

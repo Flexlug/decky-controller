@@ -16,33 +16,14 @@ CAPTURED_STATES = frozenset({"CAPTURING", "GADGET_UP", "WAITING_HOST", "ACTIVE"}
 DAEMON_STOPPED_STATE = "STOPPED"   # the daemon's last state; the backend shows STOPPING until the process is gone
 
 
-def parse_event_line(line: str) -> Optional[JsonDict]:
-    """One stdout line → event dict, or ``None`` when it is not a JSON object (plain log text)."""
-    try:
-        event = json.loads(line)
-    except ValueError:
-        return None
-    return event if isinstance(event, dict) else None
-
-
-def parse_json_object(text: str) -> Optional[JsonDict]:
-    """The JSON object printed by a one-shot CLI command; tolerates stray log lines before the JSON."""
-    text = text.strip()
-    if not text:
-        return None
-    parsed: Any = None
+def parse_json_object(text: str, what: str) -> Optional[JsonDict]:
+    """The JSON object a one-shot CLI command prints on stdout (logs go to stderr), or ``None``."""
     try:
         parsed = json.loads(text)
-    except ValueError:
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    parsed = json.loads(line)
-                    break
-                except ValueError:
-                    continue
+    except ValueError as exc:
+        log.warning("%s printed no JSON object (%s): %r", what, exc, text[-200:])
+        return None
     if not isinstance(parsed, dict):
-        log.debug("no JSON object in CLI output (%d chars)", len(text))
+        log.warning("%s printed %s instead of a JSON object", what, type(parsed).__name__)
         return None
     return parsed
