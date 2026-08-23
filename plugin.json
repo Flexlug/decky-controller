@@ -1,0 +1,11 @@
+{
+  "name": "Decky Controller",
+  "author": "flexlug",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["controller", "usb", "gamepad", "xinput", "root"],
+    "description": "Use your Steam Deck as a wired Xbox 360 (XInput) or generic USB gamepad for another PC.",
+    "image": "https://opengraph.githubassets.com/1/flexlug/decky-controller"
+  }
+}
