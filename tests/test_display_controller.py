@@ -1,7 +1,7 @@
 import os
 import shutil
 import tempfile
-import time
+import threading
 import unittest
 
 import _path  # noqa: F401
@@ -11,14 +11,6 @@ from deckgadget.platform.display.compositor import GamescopeSleep
 from deckgadget.platform.display.controller import ScreenController
 from deckgadget.util.log import NullEventSink
 from fakes import FakeRunner, FakeScreenMethod, make_socket, read, write
-
-
-def wait_until(pred, timeout=2.0):
-    deadline = time.monotonic() + timeout
-    while not pred() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    return pred()
-
 
 
 class ScreenControllerTest(unittest.TestCase):
@@ -32,6 +24,17 @@ class ScreenControllerTest(unittest.TestCase):
         self.run_user = os.path.join(self.tmp, "run", "user")
         self.sockets = []
         self.changes = []
+        self.changed = threading.Condition()
+
+    def on_change(self, off, method):
+        with self.changed:
+            self.changes.append((off, method))
+            self.changed.notify_all()
+
+    def wait_for_changes(self, count, timeout=2.0):
+        """Block until ``on_change`` has fired ``count`` times (the re-sleep timer runs on another thread)."""
+        with self.changed:
+            return self.changed.wait_for(lambda: len(self.changes) >= count, timeout)
 
     def tearDown(self):
         for s in self.sockets:
@@ -47,8 +50,7 @@ class ScreenControllerTest(unittest.TestCase):
             run_user_base=self.run_user, binary="/usr/bin/gamescopectl", runner=runner)
         ks = kscreen if kscreen is not None else FakeScreenMethod("kscreen", available=False)
         sc = ScreenController(Backlight(self.bl, self.state), touch_event="", wake_seconds=wake_seconds,
-                                 on_change=lambda off, m: self.changes.append((off, m)), method=method,
-                                 gamescope=gs, kscreen=ks)
+                                 on_change=self.on_change, method=method, gamescope=gs, kscreen=ks)
         return sc, runner
 
     def assert_backlight_untouched(self):
@@ -70,7 +72,8 @@ class ScreenControllerTest(unittest.TestCase):
         sc._on_touch()
         self.assertFalse(sc.is_off)
         self.assertEqual(runner.argvs[-1], ["/usr/bin/gamescopectl", "drm_sleep_internal_screen", "0"])
-        self.assertTrue(wait_until(lambda: sc.is_off))
+        self.assertTrue(self.wait_for_changes(3))
+        self.assertTrue(sc.is_off)
         self.assertEqual(runner.argvs[-1], ["/usr/bin/gamescopectl", "drm_sleep_internal_screen", "1"])
         self.assertEqual(len(runner.calls), 3)
         self.assert_backlight_untouched()
@@ -97,7 +100,8 @@ class ScreenControllerTest(unittest.TestCase):
         sc._on_touch()
         self.assertFalse(sc.is_off)
         self.assertEqual(read(self.bl_file), "150")
-        self.assertTrue(wait_until(lambda: sc.is_off))
+        self.assertTrue(self.wait_for_changes(3))
+        self.assertTrue(sc.is_off)
         self.assertEqual(read(self.bl_file), "0")
         sc.deactivate()
         self.assertFalse(sc.is_off)
@@ -129,7 +133,8 @@ class ScreenControllerTest(unittest.TestCase):
         self.assert_backlight_untouched()
         sc._on_touch()
         self.assertEqual(ks.calls[-1], "wake")
-        self.assertTrue(wait_until(lambda: sc.is_off))
+        self.assertTrue(self.wait_for_changes(3))
+        self.assertTrue(sc.is_off)
         self.assertEqual(ks.calls[-1], "sleep")
         sc.deactivate()
         self.assertEqual(ks.calls[-1], "release")

@@ -9,22 +9,7 @@ import _path  # noqa: F401
 from deckgadget.platform import guard, neptune_binding
 from deckgadget.platform.display.base import ScreenMethod
 from deckhw.neptune import find_neptune
-from fakes import FakeSysfs, read, write
-
-
-class KernelBinder(neptune_binding.UsbhidBinder):
-    """UsbhidBinder whose successful ``bind`` also creates the ``driver`` symlink — what the kernel
-    does synchronously when usbhid probes the interface (recover() re-scans sysfs to verify)."""
-
-    def __init__(self, sysfs, fs):
-        super().__init__(sysfs)
-        self.fs = fs
-
-    def bind(self, itf_name):
-        ok = super().bind(itf_name)
-        if ok:
-            self.fs.bind(int(itf_name.rsplit(".", 1)[1]), "usbhid")
-        return ok
+from fakes import FakeSysfs, KernelBinder, read, write
 
 
 class NeptuneDiscoveryTest(unittest.TestCase):

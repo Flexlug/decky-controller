@@ -5,7 +5,6 @@ import os
 import shutil
 import tempfile
 import threading
-import time
 import unittest
 from unittest import mock
 
@@ -17,7 +16,7 @@ from deckhw.neptune import CONTROLLER_INTERFACE, find_neptune
 from deckgadget.sources.neptune import commands as CMD
 from deckgadget.sources.neptune import protocol as P
 from deckgadget.sources.neptune.source import NeptuneError, NeptuneUsbSource
-from fakes import FakeSysfs
+from fakes import FakeSysfs, KernelBinder
 
 SET_FEATURE = (CMD.USB_REQTYPE_SET_CLASS_INTERFACE, CMD.HID_REQ_SET_REPORT, CMD.FEATURE_WVALUE, CONTROLLER_INTERFACE)
 GET_FEATURE = (CMD.USB_REQTYPE_GET_CLASS_INTERFACE, CMD.HID_REQ_GET_REPORT, CMD.FEATURE_WVALUE, CONTROLLER_INTERFACE)
@@ -44,8 +43,9 @@ class FakeUsbfsDevice:
         self.control_ins = []
         self.reports = collections.deque()
         self.claim_error = None
-        self.control_error = None
+        self.control_error = None            # raised by the next control_out, then cleared
         self.control_failed = threading.Event()
+        self.control_after_failure = threading.Event()   # the call after a failure: the source has counted it
         self.second_heartbeat = threading.Event()
 
     def claim_interface(self, number):
@@ -64,8 +64,11 @@ class FakeUsbfsDevice:
 
     def control_out(self, request_type, request, value, index, data, timeout_ms=1000):
         if self.control_error is not None:
+            error, self.control_error = self.control_error, None
             self.control_failed.set()
-            raise self.control_error
+            raise error
+        if self.control_failed.is_set():
+            self.control_after_failure.set()
         self.control_outs.append(((request_type, request, value, index), bytes(data)))
         if sum(1 for _, payload in self.control_outs if payload == HEARTBEAT_TAIL) >= 2:
             self.second_heartbeat.set()
@@ -86,26 +89,6 @@ class FakeUsbfsDevice:
     @property
     def feature_payloads(self):
         return [payload for setup, payload in self.control_outs if setup == SET_FEATURE]
-
-
-class KernelBinder(neptune_binding.UsbhidBinder):
-    """UsbhidBinder whose writes also move the fake ``driver`` symlinks, like the kernel does."""
-
-    def __init__(self, sysfs, fs):
-        super().__init__(sysfs)
-        self.fs = fs
-
-    def unbind(self, interface_name):
-        written = super().unbind(interface_name)
-        if written:
-            self.fs.unbind(int(interface_name.rsplit(".", 1)[1]))
-        return written
-
-    def bind(self, interface_name):
-        written = super().bind(interface_name)
-        if written:
-            self.fs.bind(int(interface_name.rsplit(".", 1)[1]), "usbhid")
-        return written
 
 
 class NeptuneSourceTest(unittest.TestCase):
@@ -220,21 +203,19 @@ class NeptuneSourceTest(unittest.TestCase):
         self.assertGreaterEqual(source.heartbeats, 1)
         heartbeat_payloads = device.feature_payloads[2:]
         self.assertEqual(heartbeat_payloads[:2], CMD.heartbeat_sequence())
-        source.close()
+        source.close()                               # joins the heartbeat thread
+        self.assertIsNone(source._heartbeat_thread)
         sent_after_close = len(device.control_outs)
-        time.sleep(0.03)
         self.assertEqual(len(device.control_outs), sent_after_close)
+        self.assertTrue(device.closed)
 
     def test_heartbeat_errors_are_counted_not_fatal(self):
         source = self.make_source(heartbeat_s=0.005)
         source.open()
         device = self.devices[0]
         device.control_error = OSError(errno.EIO, "io")
-        self.assertTrue(device.control_failed.wait(1.0))
-        deadline = time.monotonic() + 1.0
-        while source.heartbeat_errors < 1 and time.monotonic() < deadline:
-            time.sleep(0.005)
-        self.assertGreaterEqual(source.heartbeat_errors, 1)
+        self.assertTrue(device.control_after_failure.wait(1.0))   # the heartbeat went on after the error
+        self.assertEqual(source.heartbeat_errors, 1)
         self.assertIsNotNone(source.usb_device)
 
     def test_rumble_sends_one_feature_report(self):

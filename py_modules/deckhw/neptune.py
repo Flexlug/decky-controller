@@ -23,7 +23,6 @@ class Endpoint:
     attributes: int
     max_packet: int
     interval: int
-    direction: str
 
     @property
     def is_in(self) -> bool:
@@ -44,10 +43,6 @@ class Interface:
     protocol: int = 0
     endpoints: List[Endpoint] = field(default_factory=list)
 
-    @property
-    def bound(self) -> bool:
-        return self.driver is not None
-
     def interrupt_in(self) -> Optional[Endpoint]:
         for endpoint in self.endpoints:
             if endpoint.is_in and endpoint.is_interrupt:
@@ -57,7 +52,6 @@ class Interface:
 
 @dataclass
 class NeptuneDevice:
-    sysfs_path: str
     name: str
     busnum: int
     devnum: int
@@ -105,7 +99,7 @@ def find_neptune(sysfs_root: str = "/sys", dev_root: str = "/dev", vid: str = NE
         if busnum is None or devnum is None:
             continue
         device = NeptuneDevice(
-            sysfs_path=sysfs.path(*device_dir), name=entry, busnum=busnum, devnum=devnum,
+            name=entry, busnum=busnum, devnum=devnum,
             devnode=os.path.join(dev_root, "bus", "usb", f"{busnum:03d}", f"{devnum:03d}"),
             product=sysfs.text(*device_dir, "product"), serial=sysfs.text(*device_dir, "serial"),
         )
@@ -134,7 +128,6 @@ def _read_interface(sysfs: Sysfs, interface_dir: tuple) -> Optional[Interface]:
             attributes=sysfs.hex(*interface_dir, entry, "bmAttributes", default=0),
             max_packet=sysfs.hex(*interface_dir, entry, "wMaxPacketSize", default=0),
             interval=sysfs.hex(*interface_dir, entry, "bInterval", default=0),
-            direction=(sysfs.text(*interface_dir, entry, "direction") or ("in" if address & 0x80 else "out")).lower(),
         ))
     return Interface(
         name=interface_dir[-1], number=number, driver=sysfs.link_name(*interface_dir, "driver"),

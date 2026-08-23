@@ -8,7 +8,7 @@ import os
 import select
 import shutil
 import tempfile
-import time
+import threading
 import unittest
 from unittest import mock
 
@@ -20,15 +20,6 @@ from deckgadget.state import ControllerState
 from deckgadget.transports import usb_hid
 from deckgadget.transports.base import TransportError
 from fakes import FakeSysfs, read, write
-
-
-def wait_until(predicate, timeout=1.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.005)
-    return predicate()
 
 
 def read_from_fifo(path, timeout=1.0):
@@ -182,7 +173,8 @@ class UsbHidTransportTest(unittest.TestCase):
         report = self.profile.pack(ControllerState(buttons=1, lx=1000))
         self.transport.send(report)
         self.assertEqual(read_from_fifo(self.node), report)
-        self.assertTrue(wait_until(lambda: self.transport.metrics().sent == 1))
+        self.transport.stop()                       # joins the writer: its counters are final
+        self.assertEqual(self.transport.metrics().sent, 1)
 
     def test_send_keeps_only_the_newest_unsent_report(self):
         self.start()
@@ -195,30 +187,38 @@ class UsbHidTransportTest(unittest.TestCase):
         self.start(writer=True)
         real_write = os.write
         failures = []
+        failed = threading.Event()
 
         def write_not_configured_once(fd, data):
             if fd == self.transport._fd and not failures:
                 failures.append(data)
+                failed.set()
                 raise OSError(errno.ESHUTDOWN, "not configured")
             return real_write(fd, data)
 
         with mock.patch.object(usb_hid.os, "write", write_not_configured_once):
             self.transport.send(b"\x01" * 9)
-            self.assertTrue(wait_until(lambda: failures))
+            self.assertTrue(failed.wait(1.0))
             self.transport.send(b"\x02" * 9)
             self.assertEqual(read_from_fifo(self.node), b"\x02" * 9)
-        self.assertTrue(wait_until(lambda: self.transport.metrics().sent == 1))
-        self.assertEqual(self.transport.metrics().errors, 0)
+        self.transport.stop()
+        self.assertEqual((self.transport.metrics().sent, self.transport.metrics().errors), (1, 0))
 
     def test_host_output_reports_reach_the_feedback_callback(self):
         feedbacks = []
-        self.start(reader=True, on_feedback=feedbacks.append)
+        received = threading.Event()
+
+        def on_feedback(feedback):
+            feedbacks.append(feedback)
+            received.set()
+
+        self.start(reader=True, on_feedback=on_feedback)
         fd = os.open(self.node, os.O_WRONLY | os.O_NONBLOCK)
         try:
             os.write(fd, b"\x01\x02")
         finally:
             os.close(fd)
-        self.assertTrue(wait_until(lambda: feedbacks))
+        self.assertTrue(received.wait(1.0))
         self.assertEqual((feedbacks[0].kind, feedbacks[0].raw), ("unknown", b"\x01\x02"))
         self.assertEqual(self.transport.metrics().out_reports, 1)
 

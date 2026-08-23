@@ -147,22 +147,7 @@ function cableRow(status: Status): RowInfo & { label: string } {
         tone: "warn",
         description: "Power on the port; waiting for details.",
       };
-    default:
-      break;
   }
-  // older backend without cable_kind
-  if (status.host_connected) {
-    return { label: "Cable", value: "PC", tone: "good", description: "Plugged into a PC. Ready to start." };
-  }
-  if ((status.extcon?.["USB-HOST"] ?? 0) === 1) {
-    return {
-      label: "Cable",
-      value: "Dock",
-      tone: "warn",
-      description: "A dock/accessory is attached — unplug it and connect the Deck to a PC.",
-    };
-  }
-  return { label: "Cable", value: "Not connected", tone: "off", description: PLUG_INTO_PC };
 }
 
 function controllerRow(status: Status): RowInfo {

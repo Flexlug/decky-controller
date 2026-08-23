@@ -4,6 +4,7 @@ import socket
 
 import _path  # noqa: F401
 
+from deckgadget.platform import neptune_binding
 from deckgadget.platform.display.base import ScreenMethod
 from deckgadget.platform.display.compositor import CommandResult
 
@@ -232,3 +233,24 @@ class FakeScreenMethod(ScreenMethod):
     def release(self):
         self.calls.append("release")
         return self.wake_ok
+
+
+class KernelBinder(neptune_binding.UsbhidBinder):
+    """UsbhidBinder whose successful bind/unbind writes also move the fake ``driver`` symlink — what the
+    kernel does synchronously when usbhid probes or releases the interface."""
+
+    def __init__(self, sysfs, fs):
+        super().__init__(sysfs)
+        self.fs = fs
+
+    def unbind(self, interface_name):
+        written = super().unbind(interface_name)
+        if written:
+            self.fs.unbind(int(interface_name.rsplit(".", 1)[1]))
+        return written
+
+    def bind(self, interface_name):
+        written = super().bind(interface_name)
+        if written:
+            self.fs.bind(int(interface_name.rsplit(".", 1)[1]), "usbhid")
+        return written

@@ -56,11 +56,11 @@ export interface Status {
   extcon: Record<string, number>;
   /** udc_state === "configured" — only meaningful once a session is up. */
   host_connected: boolean;
-  // cable_* describe the port independent of the gadget; null/absent = unreadable. Never shown as volts/amps.
-  cable_power?: boolean | null;
-  pd_contract_mv?: number | null;
-  pd_contract_ma?: number | null;
-  cable_kind?: CableKind;
+  // cable_* describe the port independent of the gadget; null = unreadable. Never shown as volts/amps.
+  cable_power: boolean | null;
+  pd_contract_mv: number | null;
+  pd_contract_ma: number | null;
+  cable_kind: CableKind;
   neptune_present: boolean;
   neptune_captured: boolean;
   daemon_running: boolean;
