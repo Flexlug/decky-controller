@@ -127,6 +127,21 @@ Release: bump `version` in `package.json`, commit, `git tag v<version>`, push th
 * **Descriptive variable names; no acronyms or abbreviations** (`st`, `rc`, `pr`, `ap`, `bl`, `v`, `t`,
   `d`, `m` …). Single‑letter names only where convention makes them idiomatic (loop indices `i`/`j`,
   `f` in `with open(...) as f`, `e` in `except ... as e`).
+* **One concern per module; no dump files.** A module holds one idea (a protocol's constants + parser,
+  one device wrapper, one strategy family). Unrelated helpers/classes/constants never share a file just
+  because they are "small". When a module gains a second concern or passes ~300 lines, split it into a
+  package (`platform/display/`, `sources/neptune/`, `transports/rawgadget/`, `controller_backend/daemon/`
+  are the pattern). No compatibility re‑export shims — callers import the concrete module.
+* **Functions are for reuse or for naming a sizeable step.** Don't fragment code into "read a file and
+  pull one field" helpers whose call site is as long as the body; read sysfs through
+  `deckhw.sysfs.Sysfs(root).text("class", "udc", name, "state")` instead of `read_text(os.path.join(…))`
+  chains. Long orchestration (`recover()`, `cmd_probe`, EP0 handling) is split into named steps.
+* **Never swallow an error silently.** Every `except` either re‑raises, records into a report/result that
+  the caller logs, or logs itself: `ERROR` when giving up (session/rollback failed, daemon won't start),
+  `WARNING` when continuing degraded (fallback taken, best‑effort cleanup failed, corrupt file → defaults),
+  `DEBUG` for expected probes (optional sysfs file absent, state dir not writable, fd close on teardown).
+  Only pure control flow stays silent: `BlockingIOError` on non‑blocking fds, `ProcessLookupError` after
+  exit, `FileNotFoundError` on remove, `CancelledError`, bounded waits returned to the caller.
 * **No duplicated helpers.** One implementation of `_read`/`_write`‑style utilities shared across modules
   (`deckgadget/util/`), one fake‑sysfs builder shared across tests — not a private copy per file.
 
