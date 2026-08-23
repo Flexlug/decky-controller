@@ -1,3 +1,5 @@
+**English** | [Русский](README.ru.md)
+
 # Decky Controller
 
 A [Decky Loader](https://decky.xyz) plugin that turns your Steam Deck into a USB game controller for another
