@@ -23,34 +23,40 @@ EV_KEY = 0x01
 EV_ABS = 0x03
 BTN_TOUCH = 0x14A
 ABS_MT_TRACKING_ID = 0x39
+ABS_MT_POSITION_X = 0x35
+INPUT_PROP_DIRECT = 0x01   # include/uapi/linux/input.h: touchscreens/tablets, not touchpads
 
 
 def find_touchscreen(sysfs: str = "/sys", dev: str = "/dev",
                      name_substr: str = TOUCHSCREEN_NAME_SUBSTR) -> Optional[str]:
-    """``/dev/input/eventN`` of the device whose name contains ``name_substr``."""
+    """``/dev/input/eventN`` of the touchscreen: a direct-input device (``INPUT_PROP_DIRECT``) reporting
+    multitouch positions (``ABS_MT_POSITION_X``) — the same test udev uses for ``ID_INPUT_TOUCHSCREEN``, so it
+    does not depend on the panel model. The Deck's controller name only breaks ties between several matches."""
     tree = Sysfs(sysfs)
-    for entry in sorted(tree.listdir("class", "input"), key=lambda name: (len(name), name)):
+    candidates = []
+    for entry in tree.listdir("class", "input"):
         if not entry.startswith("event"):
             continue
-        name = tree.text("class", "input", entry, "device", "name") or ""
-        if name_substr.lower() in name.lower():
-            return os.path.join(dev, "input", entry)
-    # Fallback: /proc/bus/input/devices ("N: Name=..." followed by "H: Handlers=... eventN")
-    try:
-        with open("/proc/bus/input/devices", "r", encoding="utf-8", errors="replace") as f:
-            blocks = f.read().split("\n\n")
-    except OSError as exc:
-        log.debug("cannot read /proc/bus/input/devices: %s", exc)
+        properties = _bitmask(tree.text("class", "input", entry, "device", "properties"))
+        abs_axes = _bitmask(tree.text("class", "input", entry, "device", "capabilities", "abs"))
+        if properties & (1 << INPUT_PROP_DIRECT) and abs_axes & (1 << ABS_MT_POSITION_X):
+            name = tree.text("class", "input", entry, "device", "name") or ""
+            candidates.append((name_substr.lower() not in name.lower(), len(entry), entry))
+    if not candidates:
+        log.debug("no touchscreen (INPUT_PROP_DIRECT + ABS_MT_POSITION_X) under %s/class/input", sysfs)
         return None
-    for block in blocks:
-        if name_substr.lower() not in block.lower():
-            continue
-        for line in block.splitlines():
-            if line.startswith("H:"):
-                for token in line.split():
-                    if token.startswith("event"):
-                        return os.path.join(dev, "input", token)
-    return None
+    return os.path.join(dev, "input", min(candidates)[2])
+
+
+def _bitmask(text: Optional[str]) -> int:
+    """sysfs bitmask files: space-separated 64-bit hex words, most significant first."""
+    if not text:
+        return 0
+    try:
+        return int("".join(word.zfill(16) for word in text.split()), 16)
+    except ValueError:
+        log.debug("unparsable input bitmask %r", text)
+        return 0
 
 
 def parse_input_events(data: bytes):

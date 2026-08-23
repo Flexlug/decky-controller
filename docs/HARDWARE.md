@@ -72,7 +72,9 @@ plugin's `run` captured the controller and a game on the PC was played from the 
 * Fallback: `/sys/class/backlight/amdgpu_bl0/brightness = 0` only **dims** the OLED to its minimum; it does not
   turn it off. `/sys/class/drm/card0-eDP-1/dpms` is read‑only; `status` is writable (force off) but breaks the
   compositor — not used. `bl_power` exists but is not honoured for the OLED.
-* Touch wake: the touchscreen (`FTS3528`, evdev) keeps working while the controller is captured.
+* Touch wake: the touchscreen (`FTS3528:00 2808:1015` on the OLED, evdev) keeps working while the controller is
+  captured. The daemon finds it by capabilities (`INPUT_PROP_DIRECT` + `ABS_MT_POSITION_X`, the udev
+  `ID_INPUT_TOUCHSCREEN` test), so a different panel controller on the LCD model is picked up the same way.
 
 ## Sources
 

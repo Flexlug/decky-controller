@@ -114,8 +114,12 @@ class FakeSysfs:
         write(os.path.join(self.backlight, "max_brightness"), f"{max_brightness}\n")
         return self
 
-    def add_input_device(self, event, name):
-        write(os.path.join(self.sys, "class", "input", event, "device", "name"), f"{name}\n")
+    def add_input_device(self, event, name, touchscreen=False):
+        """An evdev node; ``touchscreen=True`` gives it INPUT_PROP_DIRECT and ABS_MT_POSITION_X like the FTS3528."""
+        device = os.path.join(self.sys, "class", "input", event, "device")
+        write(os.path.join(device, "name"), f"{name}\n")
+        write(os.path.join(device, "properties"), "2\n" if touchscreen else "0\n")
+        write(os.path.join(device, "capabilities", "abs"), "261800000000003\n" if touchscreen else "3003f\n")
         return self
 
     # --- USB-C port: power, PD contract, extcon, UDC --------------------------------------------
