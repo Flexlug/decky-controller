@@ -8,7 +8,7 @@ import _path  # noqa: F401
 
 from controller_backend.session import SessionView
 from controller_backend.settings import DEFAULT_SETTINGS
-from controller_backend.status import build_status, connectivity_signature, hardware_facts
+from controller_backend.status import build_status, connectivity_signature, status_facts
 from fakes import FakeSysfs, write
 
 
@@ -36,7 +36,7 @@ class HardwareFactsTest(unittest.TestCase):
 
     def test_pc_plugged_idle(self):
         fs = deck_sysfs(self.tmp)
-        facts = hardware_facts(fs.sys, fs.dev)
+        facts = status_facts(fs.sys, fs.dev)
         self.assertEqual(facts["model"], "Galileo")
         self.assertTrue(facts["drd_enabled"])
         self.assertEqual((facts["udc_name"], facts["udc_state"], facts["udc_speed"]),
@@ -51,41 +51,41 @@ class HardwareFactsTest(unittest.TestCase):
 
     def test_configured_means_host_connected(self):
         fs = deck_sysfs(self.tmp, udc_state="configured")
-        self.assertTrue(hardware_facts(fs.sys, fs.dev)["host_connected"])
+        self.assertTrue(status_facts(fs.sys, fs.dev)["host_connected"])
 
     def test_charger_dock_and_unplugged_classification(self):
         charger = deck_sysfs(os.path.join(self.tmp, "a"), pd_mv=20000)
-        self.assertEqual(hardware_facts(charger.sys, charger.dev)["cable_kind"], "charger")
+        self.assertEqual(status_facts(charger.sys, charger.dev)["cable_kind"], "charger")
         dock = deck_sysfs(os.path.join(self.tmp, "b"), usb_host=1)
-        self.assertEqual(hardware_facts(dock.sys, dock.dev)["cable_kind"], "host_device")
+        self.assertEqual(status_facts(dock.sys, dock.dev)["cable_kind"], "host_device")
         unplugged = deck_sysfs(os.path.join(self.tmp, "c"), acad_online=0, pd_mv=0)
-        facts = hardware_facts(unplugged.sys, unplugged.dev)
+        facts = status_facts(unplugged.sys, unplugged.dev)
         self.assertEqual((facts["cable_kind"], facts["cable_power"]), ("none", False))
 
     def test_drd_off_no_neptune_and_detached_neptune(self):
         fs = deck_sysfs(self.tmp, drd=False, neptune=False)
-        facts = hardware_facts(fs.sys, fs.dev)
+        facts = status_facts(fs.sys, fs.dev)
         self.assertFalse(facts["drd_enabled"])
         self.assertFalse(facts["neptune_present"])
         captured = deck_sysfs(os.path.join(self.tmp, "captured"))
         captured.unbind(2)
-        self.assertTrue(hardware_facts(captured.sys, captured.dev)["neptune_captured"])
+        self.assertTrue(status_facts(captured.sys, captured.dev)["neptune_captured"])
 
     def test_empty_sysfs_is_all_unknown(self):
         empty = os.path.join(self.tmp, "empty")
         os.makedirs(empty)
-        facts = hardware_facts(empty, os.path.join(self.tmp, "nodev"))
+        facts = status_facts(empty, os.path.join(self.tmp, "nodev"))
         self.assertEqual((facts["drd_enabled"], facts["udc_name"], facts["cable_kind"], facts["neptune_present"],
                           facts["cable_power"], facts["extcon"]),
                          (False, None, "unknown", False, None, {"USB": 0, "USB-HOST": 0}))
 
     def test_connectivity_signature_tracks_only_port_facts(self):
         fs = deck_sysfs(self.tmp)
-        before = connectivity_signature(hardware_facts(fs.sys, fs.dev))
+        before = connectivity_signature(status_facts(fs.sys, fs.dev))
         write(os.path.join(fs.sys, "class", "dmi", "id", "product_name"), "Jupiter\n")
-        self.assertEqual(before, connectivity_signature(hardware_facts(fs.sys, fs.dev)))
+        self.assertEqual(before, connectivity_signature(status_facts(fs.sys, fs.dev)))
         fs.set_udc_state("configured")
-        self.assertNotEqual(before, connectivity_signature(hardware_facts(fs.sys, fs.dev)))
+        self.assertNotEqual(before, connectivity_signature(status_facts(fs.sys, fs.dev)))
 
 
 class BuildStatusTest(unittest.TestCase):
@@ -93,28 +93,27 @@ class BuildStatusTest(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="backend_build_status_")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         fs = deck_sysfs(self.tmp)
-        self.facts = hardware_facts(fs.sys, fs.dev)
+        self.facts = status_facts(fs.sys, fs.dev)
         self.session = SessionView()
 
     def status(self, **overrides):
-        arguments = dict(plugin_version="0.1.0", facts=self.facts, cli_status=None, cli_error=None,
+        arguments = dict(plugin_version="0.1.0", facts=self.facts,
                          session=self.session, running=False, daemon_pid=None, settings=DEFAULT_SETTINGS)
         arguments.update(overrides)
         return build_status(**arguments)
 
     def test_idle_status(self):
-        status = self.status(cli_error="unavailable")
+        status = self.status()
         self.assertTrue(status["ok"])
         self.assertEqual((status["session_state"], status["daemon_running"], status["daemon_pid"]), ("IDLE", False, None))
         self.assertEqual(status["cable_kind"], "pc")
         self.assertFalse(status["screen_off"])
-        self.assertEqual(status["status_error"], "unavailable")
         self.assertEqual(status["metrics"], {"hz": 0, "reports": 0, "dropped": 0})
 
-    def test_cli_status_overrides_sysfs_facts(self):
-        status = self.status(cli_status={"cable_kind": "charger", "neptune_captured": True})
-        self.assertEqual(status["cable_kind"], "charger")
-        self.assertTrue(status["neptune_captured"])
+    def test_drd_known_from_the_one_time_probe_survives_a_missing_driver_link(self):
+        fs = deck_sysfs(os.path.join(self.tmp, "nodrd"), drd=False)
+        self.assertFalse(status_facts(fs.sys, fs.dev)["drd_enabled"])
+        self.assertTrue(status_facts(fs.sys, fs.dev, drd_known_enabled=True)["drd_enabled"])
 
     def test_running_session_fields_and_inferred_screen_off(self):
         self.session.begin("xbox360", "raw")

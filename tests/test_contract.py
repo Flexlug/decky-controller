@@ -14,7 +14,8 @@ import decky_stub
 from controller_backend import session as backend_session
 from controller_backend import service as backend_service
 from controller_backend import settings as backend_settings
-from controller_backend.daemon import commands, events
+from controller_backend import status as backend_status
+from controller_backend.daemon import events
 from controller_backend.service import Service
 from controller_backend.session import Toast
 from deckgadget import config
@@ -122,7 +123,7 @@ class BackendHarness(unittest.TestCase):
         asyncio.run(self.service._on_daemon_event(event))
 
     def fallback_status(self):
-        return asyncio.run(self.service.build_status())
+        return self.service.build_status()
 
 
 class AllowedValuesTest(unittest.TestCase):
@@ -247,12 +248,10 @@ class StatusShapeTest(BackendHarness):
         ts_metrics = set(re.findall(r"\b(\w+): number", re.search(r"metrics: \{([^}]*)\}", TYPES_TS).group(1)))
         self.assertEqual(ts_metrics, set(status["metrics"]))
 
-    def test_daemon_status_json_carries_every_key_the_backend_reads(self):
+    def test_daemon_status_json_carries_every_hardware_key_of_status(self):
         fs = FakeSysfs(os.path.join(self.root, "daemon-sys"))
         daemon_status = collect_status(fs.sys, fs.dev, use_modprobe=False)
-        self.assertLessEqual(set(commands.STATUS_KEYS_FROM_CLI), set(daemon_status))
-        normalized = commands.normalize_cli_status(daemon_status)
-        self.assertLessEqual(set(normalized), set(ts_interface_fields("Status")))
+        self.assertLessEqual(set(backend_status.STATUS_HARDWARE_KEYS), set(daemon_status))
 
 
 if __name__ == "__main__":

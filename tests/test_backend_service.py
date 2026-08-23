@@ -66,7 +66,7 @@ class EventMappingTest(ServiceTestCase):
         await self.service._on_daemon_event({"ev": "state", "state": "STOPPED"})
         self.assertEqual(self.events("status")[-1]["session_state"], "STOPPING")
         self.service.supervisor.run.process.returncode = 0
-        self.assertEqual((await self.service.build_status())["session_state"], "IDLE")
+        self.assertEqual(self.service.build_status()["session_state"], "IDLE")
 
     async def test_error_event_reaches_the_status(self):
         self.fake_process()
@@ -95,29 +95,30 @@ class EventMappingTest(ServiceTestCase):
 
 
 class StatusTest(ServiceTestCase):
-    async def test_idle_status_combines_sysfs_and_cli(self):
-        status = await self.service.build_status()
+    async def test_idle_status_comes_from_sysfs_without_spawning_the_cli(self):
+        status = self.service.build_status()
         self.assertTrue(status["ok"])
         self.assertEqual((status["session_state"], status["daemon_running"], status["daemon_pid"]), ("IDLE", False, None))
         self.assertEqual(status["cable_kind"], "pc")
         self.assertTrue(status["drd_enabled"])
-        self.assertIsNone(status["status_error"])
         self.assertFalse(status["screen_off"])
+        self.assertEqual(self.cli.calls, [])
 
-    async def test_cli_failure_falls_back_to_sysfs_and_reports_status_error(self):
-        self.cli.replies["status"] = (1, "Traceback…", "boom")
-        with self.assertLogs("controller_backend.service", level="WARNING"):
-            status = await self.service.build_status(force=True)
-        self.assertIn("printed no JSON object", status["status_error"])
-        self.assertIn("boom", status["status_error"])
-        self.assertEqual(status["cable_kind"], "pc")
-
-    async def test_cli_status_is_cached_within_ttl(self):
-        await self.service.build_status()
-        await self.service.build_status()
+    async def test_diagnostics_runs_the_daemon_status_once_for_comparison(self):
+        self.cli.replies["status"] = (0, '{"ok": true, "cable_kind": "pc"}', "")
+        diagnostics = await self.service.diagnostics()
         self.assertEqual([call[0] for call in self.cli.calls], ["status"])
-        await self.service.build_status(force=True)
-        self.assertEqual([call[0] for call in self.cli.calls], ["status", "status"])
+        self.assertEqual(diagnostics["cli_status_raw"]["cable_kind"], "pc")
+        self.assertIsNone(diagnostics["cli_status_error"])
+        self.cli.replies["status"] = (1, "Traceback…", "boom")
+        diagnostics = await self.service.diagnostics()
+        self.assertIn("boom", diagnostics["cli_status_error"])
+
+    async def test_startup_probe_records_drd(self):
+        with mock.patch("controller_backend.service.detect_drd") as probe:
+            probe.return_value = types.SimpleNamespace(enabled=True, via="modalias")
+            await self.service.probe_drd()
+        self.assertTrue(self.service.drd_known_enabled)
 
 
 class RecoverTest(ServiceTestCase):

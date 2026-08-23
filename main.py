@@ -76,7 +76,7 @@ class Plugin:
 
     async def get_status(self) -> JsonDict:
         try:
-            return await _service().build_status()
+            return _service().build_status()
         except Exception as error:
             return _error(error)
 

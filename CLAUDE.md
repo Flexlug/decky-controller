@@ -67,15 +67,16 @@ Release: bump `version` in `package.json`, commit, `git tag v<version>`, push th
   `{"ok": false, "error": …}`). The package: `settings.py` (allowed values, `sanitize_settings`,
   `SettingsStore`), `daemon/` (`launcher.py` argv/env/paths, `supervisor.py` process lifecycle incl.
   SIGTERM→SIGKILL and pidfile, `events.py` stdout contract, `commands.py` one-shot `status`/`recover`),
-  `session.py` (`SessionView` updated from daemon events), `status.py` (`hardware_facts` via `deckhw` +
-  `build_status`), `diagnostics.py`, `service.py` (`Service`: start/stop under one lock, recover policy, status
+  `session.py` (`SessionView` updated from daemon events), `status.py` (`status_facts` via `deckhw.facts` +
+  `build_status`; the backend never spawns `deckgadget status` for Status — only for Diagnostics), `diagnostics.py`, `service.py` (`Service`: start/stop under one lock, recover policy, status
   loop, emits). **The backend never imports `decky` (injected) or `deckgadget`** — the daemon only runs as a
   subprocess with `cwd=<plugin>/py_modules` and `LD_LIBRARY_PATH` stripped, so a broken core cannot take the
   backend down. It may import `deckhw` (read-only sysfs facts shared with the daemon).
 * **Shared** (`py_modules/deckhw/`): read‑only facts from sysfs, used by both backend and daemon — `sysfs.py`
   (`Sysfs(root).text/int/hex/listdir/link_name`, the one place failed reads are logged), `drd.py`, `udc.py`
   (`Udc`), `extcon.py`, `cable.py` (power, PD contract, `classify_cable`, `CABLE_KINDS`), `neptune.py`
-  (`find_neptune` → device/interfaces/endpoints), `port.py` (`PortStatus`). No ioctl, no writes.
+  (`find_neptune` → device/interfaces/endpoints), `port.py` (`PortStatus`), `facts.py` (`hardware_facts` — the
+  one hardware snapshot behind both the backend's Status and the daemon's `status` JSON). No ioctl, no writes.
 * **Daemon** (`py_modules/deckgadget/`): `__main__.py` (CLI + `collect_status`) → `config.py` (single source of
   truth for allowed values + validation) → `session.py` (state machine `IDLE → CAPTURING → GADGET_UP →
   WAITING_HOST → ACTIVE → STOPPING`, kill‑combo hold detector, unplug detection, hot loop). Pluggable

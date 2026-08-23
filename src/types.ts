@@ -72,8 +72,6 @@ export interface Status {
   screen_off: boolean;
   last_error: string | null;
   metrics: { hz: number; reports: number; dropped: number };
-  /** Set when the hardware fields came from the backend's sysfs fallback instead of `deckgadget status`. */
-  status_error: string | null;
 }
 
 export interface Settings {

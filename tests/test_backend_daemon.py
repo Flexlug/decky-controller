@@ -97,21 +97,6 @@ class JsonObjectParsingTest(unittest.TestCase):
         self.assertEqual(len(logs.output), 2)
 
 
-class NormalizeCliStatusTest(unittest.TestCase):
-    def test_canonical_keys_pass_through_and_unknown_are_dropped(self):
-        raw = {"drd_enabled": 1, "udc_name": "dwc3.1.auto", "udc_state": "configured", "host_connected": 1,
-               "neptune_present": True, "neptune_captured": 0, "cable_kind": "pc", "pd_contract_mv": 5000,
-               "kernel": "6.16", "errors": [], "gadgets": [], "version": "0.1.0"}
-        self.assertEqual(commands.normalize_cli_status(raw),
-                         {"drd_enabled": True, "udc_name": "dwc3.1.auto", "udc_state": "configured",
-                          "host_connected": True, "neptune_present": True, "neptune_captured": False,
-                          "cable_kind": "pc", "pd_contract_mv": 5000, "kernel": "6.16"})
-
-    def test_nulls_and_malformed_extcon_are_skipped(self):
-        with self.assertLogs("controller_backend.daemon.commands", level="WARNING"):
-            self.assertEqual(commands.normalize_cli_status({"cable_power": None, "extcon": "garbage", "udc_name": None}), {})
-
-
 class OneShotCommandsTest(unittest.TestCase):
     def test_status_returns_json_or_an_error(self):
         runner = FakeCliRunner({"status": (0, '{"ok": true, "drd_enabled": true}\n', "")})

@@ -37,7 +37,6 @@ import {
 } from "./types";
 
 /** Poll while the panel is open — cable/DRD change while idle. */
-const POLL_MS = 4000;
 
 type Tone = "good" | "warn" | "bad" | "off";
 const TONE_COLOR: Record<Tone, string> = {
@@ -191,10 +190,8 @@ export const Content: FC = () => {
   const { status, settings, settingsLoaded, busy } = useStore();
 
   useEffect(() => {
-    void refreshStatus();
+    void refreshStatus();   // the backend pushes every later change as a `status` event
     void loadSettings();
-    const timer = setInterval(() => void refreshStatus(), POLL_MS);
-    return () => clearInterval(timer);
   }, []);
 
   const running = !!status && status.session_state !== "IDLE";

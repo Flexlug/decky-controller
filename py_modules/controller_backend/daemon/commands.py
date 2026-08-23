@@ -47,28 +47,8 @@ class CliRunner:
         return process.returncode, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
 
 
-STATUS_KEYS_FROM_CLI = ("kernel", "model", "drd_enabled", "udc_name", "udc_state", "udc_speed", "extcon",
-                        "host_connected", "neptune_present", "neptune_captured", "cable_power",
-                        "pd_contract_mv", "pd_contract_ma", "cable_kind")
-BOOL_STATUS_KEYS = frozenset({"drd_enabled", "host_connected", "neptune_present", "neptune_captured", "cable_power"})
-
-
-def normalize_cli_status(raw: JsonDict) -> JsonDict:
-    """The Status fields out of the ``deckgadget status`` JSON: known keys only, booleans coerced, nulls dropped."""
-    result: JsonDict = {}
-    for key in STATUS_KEYS_FROM_CLI:
-        value = raw.get(key)
-        if value is None:
-            continue
-        if key == "extcon" and not isinstance(value, dict):
-            log.warning("deckgadget status: extcon is %r, expected an object — ignored", value)
-            continue
-        result[key] = bool(value) if key in BOOL_STATUS_KEYS else value
-    return result
-
-
 async def run_status(runner: CliRunner) -> tuple[Optional[JsonDict], Optional[str]]:
-    """``(status json, None)`` or ``(None, error text)`` — the caller falls back to sysfs on error."""
+    """``(status json, None)`` or ``(None, error text)``; used for diagnostics only."""
     try:
         exit_code, stdout, stderr = await runner.run("status", timeout=STATUS_TIMEOUT_S)
     except (OSError, TimeoutError, ValueError) as exc:

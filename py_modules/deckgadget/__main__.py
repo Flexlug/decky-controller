@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from deckgadget import __version__
 from deckgadget import config as C
-from deckgadget.util.fs import read_text
 from deckgadget.util.log import JsonEventSink, get_logger, setup_logging
 
 log = get_logger("cli")
@@ -76,31 +75,19 @@ def config_from_args(args: argparse.Namespace, demo: bool = False) -> C.RunConfi
 
 
 def collect_status(sysfs: str = "/sys", dev: str = "/dev", use_modprobe: bool = True) -> Dict[str, Any]:
-    from deckhw.neptune import find_neptune
-    from deckhw.port import read_port_status
+    from deckhw.facts import hardware_facts
 
     from deckgadget.platform import guard
     from deckgadget.platform.display.backlight import Backlight
     from deckgadget.platform.display.compositor import GamescopeSleep, KscreenDpms
     from deckgadget.platform.display.touch import find_touchscreen
 
-    out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": []}
-    out["kernel"] = os.uname().release
-    out["model"] = read_text(os.path.join(sysfs, "class", "dmi", "id", "product_name"))
-    out["root"] = (os.geteuid() == 0)
+    out: Dict[str, Any] = {"ok": True, "version": __version__, "errors": [], "root": os.geteuid() == 0}
     try:
-        out.update(read_port_status(sysfs, dev, use_modprobe=use_modprobe).as_dict())
+        out.update(hardware_facts(sysfs, dev, use_modprobe=use_modprobe))
     except Exception as exc:  # noqa: BLE001
-        out["errors"].append(f"port: {exc}")
-    try:
-        device = find_neptune(sysfs, dev)
-        out["neptune_present"] = device is not None
-        out["neptune_captured"] = bool(device and device.captured)
-        out["neptune"] = device.as_dict() if device else None
-    except Exception as exc:  # noqa: BLE001
-        out["errors"].append(f"neptune: {exc}")
-        out["neptune_present"] = False
-        out["neptune_captured"] = False
+        out["errors"].append(f"hardware: {exc}")
+        out.update({"neptune_present": False, "neptune_captured": False})
     try:
         out["gadgets"] = guard.list_gadgets()
     except Exception as exc:  # noqa: BLE001

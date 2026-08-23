@@ -48,14 +48,15 @@ may import `deckhw` (read-only sysfs facts, shared with the daemon):
 | `daemon/launcher.py` | interpreter/module/cwd, `run_args` from the settings, environment (`LD_LIBRARY_PATH` dropped), pidfile/log paths |
 | `daemon/supervisor.py` | `DaemonSupervisor`: spawn, stdout/stderr pumps, SIGTERM → SIGKILL, pidfile, stale-daemon kill, exit callback |
 | `daemon/events.py` | stdout JSON-lines contract: event names, session states, parsing |
-| `daemon/commands.py` | one-shot `status` / `recover` runs with timeouts, CLI status normalisation, `RecoverReport` |
+| `daemon/commands.py` | one-shot `recover` (every rollback) and `status` (diagnostics only) runs with timeouts, `RecoverReport` |
 | `session.py` | `SessionView`: the session as seen from the events (`STOPPED` → `STOPPING` until the process is gone) |
-| `status.py` | `hardware_facts` (via `deckhw`), `build_status` (CLI first, sysfs fallback, session view), connectivity signature |
+| `status.py` | `status_facts` (the hardware part of Status, via `deckhw.facts`), `build_status` (facts + session view), connectivity signature |
 | `diagnostics.py` | the Diagnostics dump (status, settings, daemon info, last recover, log tails) |
 | `service.py` | `Service`: start/stop under one lock, recover policy (load, every exit, stop), 2 s / 5 s status loop, emits |
 
 Shared (`py_modules/deckhw/`): `sysfs.py` (tree reader), `drd.py`, `udc.py`, `extcon.py`, `cable.py`, `neptune.py`
-(device discovery), `port.py` (`PortStatus`) — read-only, no ioctl, no writes.
+(device discovery), `port.py` (`PortStatus`), `facts.py` (`hardware_facts`: the one snapshot both the backend's Status
+and the daemon's `status` JSON are built from) — read-only, no ioctl, no writes.
 
 Daemon (`py_modules/deckgadget/`):
 
@@ -115,8 +116,7 @@ while the daemon lives) and `toast` (`{"title", "body", "severity": "info|warn|e
  "daemon_running": false, "daemon_pid": null,
  "session_state": "IDLE|CAPTURING|GADGET_UP|WAITING_HOST|ACTIVE|STOPPING", "session_detail": "",
  "active_profile": "xbox360|hid_gamepad|null", "transport": "raw|hid|null",
- "screen_off": false, "last_error": null, "metrics": {"hz": 0, "reports": 0, "dropped": 0},
- "status_error": null}
+ "screen_off": false, "last_error": null, "metrics": {"hz": 0, "reports": 0, "dropped": 0}}
 ```
 
 * `host_connected` = (`udc_state == "configured"`): true only while our gadget is bound and the PC has enumerated
@@ -128,7 +128,9 @@ while the daemon lives) and `toast` (`{"title", "body", "severity": "info|warn|e
   else contract ≤ 5.5 V → `pc`, > 5.5 V → `charger`; else `unknown`.
   The UI shows only the classification (PC / Charger / Dock / Not connected / Unknown); volts, amps or the words
   "PD contract" never appear in the UI — the backend fields exist for classification and diagnostics only.
-* `status_error` non‑null ⇒ the hardware fields came from the backend's sysfs fallback instead of `deckgadget status`.
+* The hardware fields are read by the backend itself from sysfs (`deckhw`), every 2 s while a session runs and on
+  every connectivity change while idle; `deckgadget status` is only run for **Diagnostics**. The modprobe‑assisted DRD
+  probe runs once at plugin load.
 
 ### Settings (defaults)
 
