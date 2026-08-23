@@ -2,141 +2,149 @@
 
 # Decky Controller
 
-A [Decky Loader](https://decky.xyz) plugin that turns your Steam Deck into a USB game controller for another
-PC — right from Gaming Mode. Plug the Deck into a PC with a USB‑C cable, flip **Controller mode** in the Quick
-Access Menu, and the PC sees an ordinary USB gamepad — **XInput** (works in Windows out of the box) or **generic
-HID**; more profiles are planned. The Deck's screen turns off while it is a controller; to get your Deck back,
-hold the exit combo (**L4+R4** by default, configurable). No Desktop Mode, no password, nothing to install on
-the PC.
+A plugin for [Decky Loader](https://decky.xyz). While it is enabled, the Steam Deck acts as a wired USB
+gamepad for the computer attached to its USB‑C port. Two profiles are supported: XInput (Xbox 360
+compatible) and a generic HID gamepad. In the active mode the Deck's built‑in controller is captured and
+forwarded to the PC and the Deck's screen is turned off; the mode ends when a configured button combination
+is held (L4+R4 by default), when the stop button in the UI is pressed, or when the cable is unplugged.
+Nothing has to be installed on the PC.
 
-Everything happens in memory: no system files are modified and a reboot always restores the Deck to normal.
+The plugin only changes kernel state in memory (see "What the plugin changes on the system"); a reboot
+returns the Deck to its original state.
 
 ## Requirements
 
-* Steam Deck with SteamOS 3.6 or newer and Decky Loader.
-* USB Dual‑Role Device (DRD) enabled in the BIOS (one‑time, steps below).
-* A USB‑C **data** cable to the PC (many charge‑only cables have no data lines — if the PC never sees the Deck,
-  try another cable).
+* Steam Deck, SteamOS 3.6 or newer, Decky Loader installed.
+* USB Dual‑Role Device (DRD) enabled in the BIOS — see below, a one‑time change.
+* A USB‑C cable with data lines. Charge‑only cables do not work: the PC will not see a device.
 
-### Enable DRD in the BIOS (one‑time)
+### Enabling DRD in the BIOS
 
-By default the Deck's USB‑C port is host‑only (for docks and peripherals). Dual‑Role lets the port also act as a
-device when it is plugged into a computer. While DRD is on, the port still works as a host whenever a dock or
-peripheral is attached — the role follows what is plugged in.
+By default the USB‑C port is host‑only (docks, peripherals). With DRD the port can also act as a device when
+it is connected to a computer; with a dock or a peripheral attached it still acts as a host — the role is
+chosen automatically from what is plugged in.
 
-1. Power the Deck **off** completely.
-2. Hold **Volume Up** and press **Power**; release both when you hear the chime — the BIOS menu appears.
-3. Choose **Setup Utility**.
-4. Go to **Advanced → USB Configuration → USB Dual‑Role Device**.
-5. Change it from **XHCI** to **DRD**.
-6. Save and exit (**Exit → Exit Saving Changes**, or F10). The Deck reboots.
+1. Power the Deck off completely.
+2. Hold Volume Up and press Power; release both after the chime — the BIOS menu opens.
+3. Select **Setup Utility**.
+4. Open **Advanced → USB Configuration → USB Dual‑Role Device**.
+5. Change the value from **XHCI** to **DRD**.
+6. Save and exit (**Exit → Exit Saving Changes** or F10). The Deck reboots.
 
-The plugin's **How to enable DRD** button shows the same steps on the Deck. Note: while DRD is on,
-**Windows installed on the Deck** loses its USB port (Windows has no driver for the dual‑role controller).
-Switch back to XHCI if you need USB under Windows‑on‑Deck; SteamOS is unaffected either way.
+The **How to enable DRD** button in the plugin shows the same steps.
 
-## Install
+Limitation: with DRD enabled, a Windows installation on the Deck itself does not see the USB port (Windows
+has no driver for the dual‑role controller). If you need USB under Windows on the Deck, set the value back
+to XHCI. SteamOS is unaffected either way.
 
-1. Download `decky-controller.zip` from GitHub Releases:
+## Installation
+
+1. Download `decky-controller.zip`:
    <https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip>
-2. On the Deck: **Decky → Settings → Developer mode** → on.
-3. **Decky → Developer → Install Plugin from URL** and paste the URL above — or **Install Plugin from ZIP** if
-   you copied the zip to the Deck (SD card, USB stick, …).
-4. **Decky Controller** appears in the Quick Access Menu (the Decky tab).
+2. On the Deck enable **Decky → Settings → Developer mode**.
+3. **Decky → Developer → Install Plugin from URL** — paste the link above; or **Install Plugin from ZIP**
+   if the file is already on the Deck.
+4. The plugin appears in the Quick Access Menu on the Decky tab.
 
-The release zip is currently the only distribution channel — the plugin is not listed in the official Decky
-store or in any third‑party store.
+The plugin is distributed through GitHub Releases only; it is not in the official Decky store or in any
+third‑party store.
 
-### Why isn't this in the official Decky store?
+### Why the plugin is not in the Decky store
 
-The official plugin database's submission checklist requires that generative AI was not used to write the
-majority of the code. This plugin was written with AI coding agents (reviewed and tested by a human on real
-hardware), so it will not be submitted there. It is distributed via GitHub Releases / URL install instead,
-while still following the store's other technical requirements.
+The submission rules of the official plugin database require that the majority of the code was not written
+by generative AI. This plugin's code was written with AI coding agents (reviewed and tested by a human on a
+real device), so it is not submitted there. The store's other technical requirements are met.
 
 ## Usage
 
-1. Plug the Deck into the PC with a USB‑C data cable (remove the dock — the port can only do one job at a time).
-2. Open the Quick Access Menu (… button) → **Decky Controller**. The **Status** section shows **DRD**,
-   **Cable** (what the port sees while idle: **PC**, **Charger**, **Dock**, **Not connected**, **Unknown**),
-   **Controller** and **Mode**. Once controller mode is on, the cable row becomes **Host** and shows
-   **Waiting…** until the PC has enumerated the controller, then **Connected**.
-3. Toggle **Controller mode** on. The Deck's built‑in controller is taken over, the screen turns off, and the PC
-   sees a new controller within a couple of seconds. Use `joy.cpl` on Windows or any game to test.
-4. Play. To stop: hold the exit combo (**L4+R4** by default, 1.5 s), or tap the screen (it wakes for a few
-   seconds) and press **Stop (full reset)**, or unplug the cable. The screen comes back and Steam sees the
-   controller again.
+1. Connect the Deck to the PC with a USB‑C cable. A dock must be disconnected: the port works either as a
+   host or as a device.
+2. Open the Quick Access Menu (… button) → **Decky Controller**. The **Status** section shows: **DRD** —
+   whether the BIOS mode is enabled; **Cable** — what the port currently sees (**PC**, **Charger**,
+   **Dock**, **Not connected**, **Unknown**); **Controller** — the state of the built‑in controller;
+   **Mode** — the session state. Once the mode is on, the **Cable** row is replaced by **Host**:
+   **Waiting…** until the PC has recognised the device, then **Connected**.
+3. Turn the **Controller mode** switch on. The built‑in controller is captured, the screen turns off, and
+   the PC detects a new controller within a few seconds. `joy.cpl` (Windows) or any game can be used to
+   check it.
+4. To exit: hold the exit combination for 1.5 s (L4+R4 by default); or touch the screen (it turns on for a
+   few seconds) and press **Stop (full reset)**; or unplug the cable. The screen turns on and the controller
+   returns to Steam.
 
-While Controller mode is active the Deck itself does not react to any input — including the Steam and QAM
-buttons — because every report goes to the PC. That is by design.
+In the active mode the Deck does not react to its own buttons, Steam and QAM included: all input goes to the
+PC.
 
 ### Profiles
 
-| Profile | PC sees | Best for |
+| Profile | What the PC sees | Intended for |
 |---|---|---|
-| **XInput** (Xbox 360 compatible) — default | a wired XInput controller (VID 045E / PID 028E), handled by Windows' built‑in `xusb22.sys`; Linux `xpad` | Windows games inside and outside Steam, emulators, anything XInput |
-| **Generic HID** | a standard USB HID gamepad (6 axes, hat, 16 buttons) | Linux hosts, DirectInput‑only software, as a fallback |
+| **XInput** (Xbox 360) — default | a wired XInput controller (VID 045E / PID 028E); Windows uses its standard `xusb22.sys` driver, Linux uses `xpad` | Windows games, emulators, any software with XInput support |
+| **Generic HID** | a USB HID gamepad: 6 axes, hat, 16 buttons | Linux, DirectInput‑only software, a fallback |
 
-Default mapping (XInput): A/B/X/Y → A/B/X/Y, L1/R1 → LB/RB, L2/R2 → triggers, sticks → sticks, L3/R3,
-View → Back, Menu → Start, D‑pad → D‑pad. Steam and QAM are **not** forwarded. The four back paddles
-(L4/L5/R4/R5) can be mapped to any button in the **Back paddles** section; the exit combo is never sent to the PC.
+XInput mapping: A/B/X/Y → A/B/X/Y, L1/R1 → LB/RB, L2/R2 → triggers, sticks → sticks, L3/R3, View → Back,
+Menu → Start, D‑pad → D‑pad. The Steam and QAM buttons are not forwarded. The back buttons L4/L5/R4/R5 are
+unassigned by default; assignments are made in the **Back paddles** section. The exit combination is not
+forwarded to the PC.
 
 ### Settings
 
-* **Profile** — XInput (Xbox 360) / Generic HID.
-* **Kill switch** (the exit combo) — L4+R4, L5+R5, L4+L5+R4+R5 or Steam+QAM, held for 1.5 s. The hold time
-  is not in the panel; change `kill_hold_ms` in `~/homebrew/settings/decky-controller/settings.json` if needed.
-* **Turn screen off while active** — saves battery and hides the frozen UI; touching the screen wakes it for a
-  few seconds so you can reach **Stop**. In Gaming Mode the panel is really turned off (gamescope display
-  sleep); Desktop Mode uses KDE DPMS if available, otherwise only dims the backlight.
-* **Back paddles** — what L4/L5/R4/R5 send to the PC (A/B/X/Y, LB/RB, L3/R3, View/Menu, D‑pad or nothing).
+* **Profile** — XInput (Xbox 360) or Generic HID.
+* **Kill switch** — the exit combination: L4+R4, L5+R5, L4+L5+R4+R5 or Steam+QAM; held for 1.5 s. The hold
+  time is not configurable in the UI; if needed, change `kill_hold_ms` in
+  `~/homebrew/settings/decky-controller/settings.json`.
+* **Turn screen off while active** — turn the screen off for the duration of the session. In Gaming Mode
+  the panel is turned off through gamescope; in Desktop Mode KDE DPMS is used when available, otherwise the
+  backlight is dimmed. Touching the screen turns it on for a few seconds.
+* **Back paddles** — what L4/L5/R4/R5 send to the PC: A/B/X/Y, LB/RB, L3/R3, View/Menu, D‑pad directions,
+  or nothing.
 
 ## Limitations
 
-* The USB‑C port is *either* a host port *or* the controller link. Docks, hubs, Ethernet adapters and other
-  USB devices cannot be used while Controller mode is on (plugging one in makes the port a host again).
-  Charging through the PC's USB port is limited to what that port supplies.
-* The Deck's UI is fully locked out while active (Steam button included) — by design.
-* Gyro, trackpads, rumble and Bluetooth output are not in this version.
-* Windows installed **on the Deck** has no USB while DRD is enabled (see above).
+* In the active mode the USB‑C port is taken by the link to the PC: docks, hubs, Ethernet adapters and other
+  USB devices cannot be used (plugging one in switches the port back to host mode). Charging comes from the
+  PC's USB port within that port's limits.
+* The Deck's UI is unavailable in the active mode, the Steam button included.
+* Gyro, trackpads, rumble and Bluetooth are not supported in the current version.
+* Windows on the Deck itself does not see USB while DRD is enabled (see above).
 
 ## Troubleshooting
 
-* **DRD: not detected / "DRD not enabled"** → follow the BIOS steps above; after enabling, the panel shows DRD on
-  as soon as SteamOS boots.
-* **Cable: Not connected** although the cable is in → the port sees no power at all: the cable or port is dead,
-  or the PC port is asleep. Try another cable (it must carry data) or port; some PCs need a second after
-  plugging in. **Charger** → that is a charger, not a PC. **Dock** → unplug the dock/accessory. **Unknown** →
-  readings not available yet; re‑open the panel in a second.
-* **Controller mode won't start / the PC sees nothing** → press **Stop (full reset)**, re‑plug, try again.
-* **The Deck's own controller is dead after something went wrong** → press **Stop (full reset)** (the
-  touchscreen always works), or simply reboot: all changes live in kernel memory and vanish on reboot.
-* **Logs**: **Decky → Settings → Developer → Show plugin logs**, or the files under
-  `~/homebrew/logs/decky-controller/` (`~/homebrew` is Decky Loader's home directory on the Deck). The panel's
-  **Diagnostics** button includes the last 50 daemon lines.
+* **DRD: not detected / "DRD not enabled"** — follow "Enabling DRD in the BIOS". After enabling, the state is
+  shown as soon as SteamOS has booted.
+* **Cable: Not connected** with a cable attached — the port sees no power: the cable or the port is faulty,
+  or the PC's port is asleep. Try another cable with data lines or another port; some PCs need a second after
+  plugging in. **Charger** — a charger is connected, not a PC. **Dock** — a dock or a peripheral is
+  connected, disconnect it. **Unknown** — readings are not available yet; reopen the panel.
+* **The mode does not start or the PC sees no device** — press **Stop (full reset)**, reconnect the cable,
+  try again.
+* **The built‑in controller does not work after a failure** — press **Stop (full reset)** (the touchscreen
+  always works) or reboot the Deck: the changes live only in kernel memory.
+* **Logs** — **Decky → Settings → Developer → Show plugin logs**, or the files in
+  `~/homebrew/logs/decky-controller/`. The **Diagnostics** button in the panel prints the state and the last
+  50 lines of the daemon log.
 
-## Safety
+## What the plugin changes on the system
 
-The plugin only changes volatile kernel state: it unbinds the built‑in controller from the `usbhid` driver
-while active, creates a USB gadget on the USB‑C port through the kernel's `raw_gadget` / `configfs` interfaces,
-and puts the display to sleep (gamescope / KDE DPMS, or dims the backlight). Nothing is written to the
-read‑only root filesystem, the bootloader, the EFI partition or the BIOS. The only persistent setting is the
-DRD toggle in the BIOS, which you change yourself. Every step is undone when the session ends, when the plugin
-stops or unloads, and — in the worst case — by a reboot.
+For the duration of a session the plugin: unbinds the built‑in controller from the `usbhid` driver; creates
+a USB gadget on the USB‑C port through the kernel's `raw_gadget` or `configfs` interfaces; turns the display
+off (gamescope, KDE DPMS or the backlight). All of this is kernel state in RAM. The root filesystem
+(read‑only), the bootloader, the EFI partition and the BIOS are not modified. The only persistent setting is
+the DRD switch in the BIOS, which the user changes themselves. The changes are rolled back when the session
+ends, when the plugin is stopped or unloaded; as a last resort a reboot removes them.
 
 ## Development
 
-See [docs/DEV.md](docs/DEV.md) (build, checks, packaging, install on the Deck, running the daemon by hand) and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) / [docs/HARDWARE.md](docs/HARDWARE.md).
+Build, checks, packaging, installing on the Deck, running the daemon by hand — [docs/DEV.md](docs/DEV.md).
+Architecture — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); verified hardware facts —
+[docs/HARDWARE.md](docs/HARDWARE.md).
 
-## Credits
+## References
 
-Prior art and references this project stands on: [GadgetDeck](https://github.com/Frederic98/GadgetDeck),
-[DeckJoy](https://github.com/Lucaber/deckjoy), [DeckMTP](https://github.com/dafta/DeckMTP),
-[360‑raw‑gadget](https://github.com/CasperVM/360-raw-gadget), the Linux
-[raw‑gadget](https://docs.kernel.org/usb/raw-gadget.html) interface, and
-[SDL](https://github.com/libsdl-org/SDL) (Steam Deck HID report layout and commands). Thanks to the Decky
-Loader team for the plugin platform.
+[GadgetDeck](https://github.com/Frederic98/GadgetDeck), [DeckJoy](https://github.com/Lucaber/deckjoy),
+[DeckMTP](https://github.com/dafta/DeckMTP), [360‑raw‑gadget](https://github.com/CasperVM/360-raw-gadget),
+the Linux [raw‑gadget](https://docs.kernel.org/usb/raw-gadget.html) interface,
+[SDL](https://github.com/libsdl-org/SDL) (Steam Deck HID report layout and commands), the Decky Loader
+plugin platform.
 
 ## License
 
