@@ -35,22 +35,27 @@ The **How to enable DRD** button in the plugin shows the same steps.
 
 ## Installation
 
-The plugin is distributed through GitHub Releases only; it is not in the official Decky store or in any
-third‑party store. First enable **Decky → Settings → Developer mode** on the Deck, then use one of the two
-ways:
+Three ways; the plugin is the same in all of them and updates work in each.
 
-* **By URL** — **Decky → Developer → Install Plugin from URL**, paste
+* **From the Decky Plugins Extended store** — a community store that merges the official catalog with
+  plugins that are not in it. In Decky open **Settings → General → Store Channel**, set it to `Custom`,
+  and set **Custom Store** to `https://decky-extended-plugins.beallio.com/plugins.json`. Then install
+  **Decky Controller** from the Decky store as usual; updates appear there too.
+* **By URL** — enable **Decky → Settings → Developer mode**, then **Decky → Developer → Install Plugin
+  from URL**, paste
   `https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip`.
 * **From a file** — download `decky-controller.zip` from the same link, copy it to the Deck (SD card, USB
-  stick, `scp`) and choose **Decky → Developer → Install Plugin from ZIP**.
+  stick, `scp`) and choose **Decky → Developer → Install Plugin from ZIP** (Developer mode on).
 
 The plugin appears in the Quick Access Menu on the Decky tab.
 
-### Why the plugin is not in the Decky store
+### Why the plugin is not in the official Decky store
 
 The submission rules of the official plugin database require that the majority of the code was not written
 by generative AI. This plugin's code was written with AI coding agents (reviewed and tested by a human on a
-real device), so it is not submitted there. The store's other technical requirements are met.
+real device), so it is not submitted there; it is available from the
+[Decky Plugins Extended](https://github.com/beallio/decky-plugins-extended) store instead. The official
+store's other technical requirements are met.
 
 ## Usage
 

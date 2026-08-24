@@ -34,21 +34,27 @@ Deck в исходное состояние.
 
 ## Установка
 
-Плагин распространяется только через GitHub Releases; в официальном магазине Decky и сторонних магазинах
-его нет. Сначала на Deck включите **Decky → Settings → Developer mode**, затем одним из двух способов:
+Три способа; плагин один и тот же, обновления работают в каждом.
 
-* **По ссылке** — **Decky → Developer → Install Plugin from URL**, вставьте
+* **Из магазина Decky Plugins Extended** — магазин сообщества, объединяющий официальный каталог с
+  плагинами, которых в нём нет. В Decky откройте **Settings → General → Store Channel**, выберите
+  `Custom` и укажите в **Custom Store** адрес `https://decky-extended-plugins.beallio.com/plugins.json`.
+  После этого установите **Decky Controller** из магазина Decky как обычно; обновления приходят туда же.
+* **По ссылке** — включите **Decky → Settings → Developer mode**, затем **Decky → Developer → Install
+  Plugin from URL**, вставьте
   `https://github.com/flexlug/decky-controller/releases/latest/download/decky-controller.zip`.
 * **Из файла** — скачайте `decky-controller.zip` по той же ссылке, скопируйте на Deck (SD‑карта, флешка,
-  `scp`) и выберите **Decky → Developer → Install Plugin from ZIP**.
+  `scp`) и выберите **Decky → Developer → Install Plugin from ZIP** (нужен Developer mode).
 
 Плагин появится в меню быстрого доступа на вкладке Decky.
 
-### Почему плагина нет в магазине Decky
+### Почему плагина нет в официальном магазине Decky
 
 Правила подачи в официальную базу плагинов требуют, чтобы бо́льшая часть кода не была написана генеративным
 ИИ. Код этого плагина написан с помощью ИИ‑агентов (с ревью и проверкой человеком на реальном устройстве),
-поэтому в магазин он не подаётся. Остальные технические требования магазина соблюдены.
+поэтому в официальный магазин он не подаётся — вместо этого он доступен в магазине
+[Decky Plugins Extended](https://github.com/beallio/decky-plugins-extended). Остальные технические
+требования официального магазина соблюдены.
 
 ## Использование
 
