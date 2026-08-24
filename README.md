@@ -35,7 +35,7 @@ The **How to enable DRD** button in the plugin shows the same steps.
 
 ## Installation
 
-Three ways; the plugin is the same in all of them and updates work in each.
+Three ways:
 
 * **From the Decky Plugins Extended store** — a community store that merges the official catalog with
   plugins that are not in it. In Decky open **Settings → General → Store Channel**, set it to `Custom`,
